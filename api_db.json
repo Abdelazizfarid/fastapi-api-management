@@ -1,0 +1,26 @@
+{
+  "apis": [
+    {
+      "id": "d3f235b3-1bcf-4be9-9e29-c48ab97950eb",
+      "name": "Ping",
+      "path": "/ping",
+      "method": "GET",
+      "python_code": "result = {\"status\": \"ok\", \"service\": \"API Management System\"}",
+      "description": "Health check endpoint",
+      "enabled": true,
+      "created_at": "2025-12-03T15:49:04.573474",
+      "updated_at": "2025-12-03T15:49:04.573485"
+    },
+    {
+      "id": "6e3392b4-7586-44fd-8c21-757a53d1c21c",
+      "name": "test",
+      "path": "/api/test",
+      "method": "GET",
+      "python_code": "# Your Python code here\n# Access request data via 'request_data' variable\n# Set 'result' variable to return data\n\nresult = {\n    'message': 'Hello from APIttttttttttt',\n    'data': request_data.get('query_params', {})\n}",
+      "description": "",
+      "enabled": true,
+      "created_at": "2025-12-03T15:57:23.371150",
+      "updated_at": "2025-12-03T15:57:23.371158"
+    }
+  ]
+}

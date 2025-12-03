@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Management System</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 API Management System</h1>
+            <nav>
+                <a href="/" class="active">APIs</a>
+                <a href="/logs">Logs</a>
+            <a href="/logout" style="margin-left: auto; color: #e74c3c;">Logout</a></nav>
+        </header>
+
+        <div class="main-content">
+            <div class="sidebar">
+                <button class="btn btn-primary" onclick="showCreateForm()">+ Create New API</button>
+                <div class="api-list" id="apiList"></div>
+            </div>
+
+            <div class="content-area">
+                <div id="createForm" class="form-container" style="display: none;">
+                    <h2>Create New API</h2>
+                    <form id="createApiForm">
+                        <div class="form-group">
+                            <label>API Name:</label>
+                            <input type="text" id="apiName" required placeholder="e.g., Get Users">
+                        </div>
+                        <div class="form-group">
+                            <label>Path:</label>
+                            <input type="text" id="apiPath" required placeholder="/api/users" pattern="^/[^\s]*">
+                            <small>Must start with /</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Method:</label>
+                            <select id="apiMethod">
+                                <option value="GET">GET</option>
+                                <option value="POST">POST</option>
+                                <option value="PUT">PUT</option>
+                                <option value="DELETE">DELETE</option>
+                                <option value="PATCH">PATCH</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Description (optional):</label>
+                            <input type="text" id="apiDescription" placeholder="What does this API do?">
+                        </div>
+                        <div class="form-group">
+                            <label>Python Function Code:</label>
+                            <textarea id="apiCode" rows="15" required placeholder="# Your Python code here
+# Access request data via 'request_data' variable
+# Set 'result' variable to return data
+
+result = {
+    'message': 'Hello from API',
+    'data': request_data.get('query_params', {})
+}"># Your Python code here
+# Access request data via 'request_data' variable
+# Set 'result' variable to return data
+
+result = {
+    'message': 'Hello from API',
+    'data': request_data.get('query_params', {})
+}</textarea>
+                            <small>Use 'request_data' to access request info. Set 'result' to return data.</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" onclick="testCode()">Test Code</button>
+                            <button type="submit" class="btn btn-primary">Create API</button>
+                            <button type="button" class="btn btn-secondary" onclick="hideCreateForm()">Cancel</button>
+                        </div>
+                    </form>
+                    <div id="testResult" class="test-result"></div>
+                </div>
+
+                <div id="editForm" class="form-container" style="display: none;">
+                    <h2>Edit API</h2>
+                    <form id="editApiForm">
+                        <input type="hidden" id="editApiId">
+                        <div class="form-group">
+                            <label>API Name:</label>
+                            <input type="text" id="editApiName" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Path:</label>
+                            <input type="text" id="editApiPath" required pattern="^/[^\s]*">
+                        </div>
+                        <div class="form-group">
+                            <label>Method:</label>
+                            <select id="editApiMethod"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Description:</label>
+                            <input type="text" id="editApiDescription">
+                        </div>
+                        <div class="form-group">
+                            <label>Python Function Code:</label>
+                            <textarea id="editApiCode" rows="15" required></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" onclick="testEditCode()">Test Code</button>
+                            <button type="submit" class="btn btn-primary">Update API</button>
+                            <button type="button" class="btn btn-danger" onclick="deleteCurrentApi()">Delete</button>
+                            <button type="button" class="btn btn-secondary" onclick="hideEditForm()">Cancel</button>
+                        </div>
+                    </form>
+                    <div id="editTestResult" class="test-result"></div>
+                </div>
+
+                <div id="emptyState" class="empty-state">
+                    <h2>Welcome to API Management</h2>
+                    <p>Create your first API to get started!</p>
+                    <button class="btn btn-primary" onclick="showCreateForm()">Create API</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Logs - Management System</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 API Logs</h1>
+            <nav>
+                <a href="/">APIs</a>
+                <a href="/logs" class="active">Logs</a>
+            <a href="/logout" style="margin-left: auto; color: #e74c3c;">Logout</a></nav>
+        </header>
+
+        <div class="logs-controls">
+            <button class="btn btn-primary" onclick="refreshLogs()">🔄 Refresh</button>
+            <button class="btn btn-danger" onclick="clearLogs()">🗑️ Clear Logs</button>
+            <label>
+                <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> Auto-refresh (5s)
+            </label>
+        </div>
+
+        <div class="logs-container">
+            <div id="logsList" class="logs-list"></div>
+            <div id="emptyLogs" class="empty-state">
+                <p>No logs yet. API calls will appear here.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/logs.js"></script>
+</body>
+</html>
