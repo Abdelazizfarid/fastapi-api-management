@@ -31,3 +31,6 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+
+# Old JSON files (migrated to PostgreSQL)
+*.json
