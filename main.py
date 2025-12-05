@@ -1717,10 +1717,12 @@ def run_utilization_sync(job_id):
     job_result = start_background_job(job_type, run_utilization_sync)
     
     # If already running, return that message, otherwise return the job result
-    if job_result.get("status") == "already_running":
+    if job_result and job_result.get("status") == "already_running":
         result = {"message": "Utilization update already started", "status": "running"}
+    elif job_result:
+        result = job_result
     else:
-        result = job_result'''
+        result = {"message": "Utilization update started", "status": "started"}'''
             
             utilization_sync_id = str(uuid.uuid4())
             now = datetime.datetime.now()

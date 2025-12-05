@@ -370,7 +370,8 @@ function showAPIsTab() {
     stopAsyncLogsAutoRefresh();
 }
 
-function showAsyncLogsTab() {
+// Make function globally accessible
+window.showAsyncLogsTab = function showAsyncLogsTab() {
     document.querySelector('nav a[href="/"]').classList.remove('active');
     document.querySelector('.async-logs-tab').classList.add('active');
     document.getElementById('asyncLogsView').style.display = 'block';
