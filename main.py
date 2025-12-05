@@ -1724,6 +1724,17 @@ def run_utilization_sync(job_id):
             
             utilization_sync_id = str(uuid.uuid4())
             now = datetime.datetime.now()
+            api_def = {
+                "id": utilization_sync_id,
+                "name": "Utilization Sync",
+                "path": "/api/utilization/sync",
+                "method": "POST",
+                "python_code": utilization_sync_code,
+                "description": "Asynchronous utilization sync from BigQuery to Odoo. Returns immediately and runs in background.",
+                "enabled": True,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat()
+            }
             cur.execute("""
                 INSERT INTO apis (id, name, path, method, python_code, description, enabled, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1735,6 +1746,12 @@ def run_utilization_sync(job_id):
             ))
             conn.commit()
             print("Utilization Sync API added to database")
+            # Register the route immediately after creating it
+            try:
+                create_dynamic_route(api_def)
+                print("Utilization Sync API route registered")
+            except Exception as e:
+                print(f"Error registering Utilization Sync API route: {e}")
         cur.close()
         return_db_connection(conn)
     except Exception as e:
