@@ -1727,45 +1727,63 @@ def run_utilization_sync(job_id):
         update_job_status(job_id, "completed", result_summary=summary_text)
         
     except Exception as e:
-            error_msg = f"Error in utilization sync: {str(e)}\\n{traceback.format_exc()}"
-            add_progress_log(job_id, error_msg, "error")
-            update_job_status(job_id, "failed", error_message=error_msg)
-            send_email("Utilization Update Failed", error_msg)
+        error_msg = f"Error in utilization sync: {str(e)}\\n{traceback.format_exc()}"
+        add_progress_log(job_id, error_msg, "error")
+        update_job_status(job_id, "failed", error_message=error_msg)
+        send_email("Utilization Update Failed", error_msg)
     
-    # Start background job (this function checks if already running internally)
-    result = None  # Initialize result variable
-    try:
-        # Call start_background_job and ensure we get a result
-        job_result = start_background_job(job_type, run_utilization_sync)
-        
-        # If already running, return that message, otherwise return the job result
-        if job_result and isinstance(job_result, dict) and job_result.get("status") == "already_running":
-            result = {"message": "Utilization update already started", "status": "running"}
-        elif job_result and isinstance(job_result, dict):
-            result = job_result
-        else:
-            # Fallback if job_result is None or empty
-            result = {"message": "Utilization update started", "status": "started", "note": "job_result was invalid"}
-    except Exception as e:
-        # Ensure result is always set even if there's an error
-        import traceback
-        error_trace = traceback.format_exc()
-        result = {"message": f"Error starting utilization update: {str(e)}", "status": "error", "error": str(e), "traceback": error_trace[:500]}
+# Start background job (this function checks if already running internally)
+# Initialize result with a default dict - never None
+result = {"status": "pending", "message": "Initializing"}
+
+try:
+    # Call start_background_job and ensure we get a result
+    job_result = start_background_job(job_type, run_utilization_sync)
     
-    # Final safety check - ensure result is always a dict, never None
-    if result is None:
-        result = {"message": "Utilization update started", "status": "started", "note": "result was None after all checks"}
+    # If already running, return that message, otherwise return the job result
+    if job_result and isinstance(job_result, dict) and job_result.get("status") == "already_running":
+        result = {"message": "Utilization update already started", "status": "running"}
+    elif job_result and isinstance(job_result, dict):
+        result = job_result
+    else:
+        # Fallback if job_result is None or empty
+        result = {"message": "Utilization update started", "status": "started", "note": "job_result was invalid", "job_result_received": str(job_result)}
+except Exception as e:
+    # Ensure result is always set even if there's an error
+    import traceback
+    error_trace = traceback.format_exc()
+    result = {"message": f"Error starting utilization update: {str(e)}", "status": "error", "error": str(e), "traceback": error_trace[:500]}
+
+# Final safety check - ensure result is always a dict, never None
+if result is None:
+    result = {"message": "Utilization update started", "status": "started", "note": "result was None after all checks"}
+
+# CRITICAL: Ensure result is always set - exec() will capture this assignment
+# Direct assignment is what exec() needs - globals()/vars() don't work in exec() context
+if not isinstance(result, dict):
+    result = {"status": "started", "message": "utilization_sync started", "note": "result was not a dict"}
+
+# Ensure result has required fields
+if "status" not in result:
+    result["status"] = "started"
+if "message" not in result:
+    result["message"] = "utilization_sync started"
+# job_id is optional, keep it if present
     
-    # CRITICAL: Force result assignment - ensure it's explicitly set in the execution context
-    # Use globals() to ensure the variable is set in the module-level context
-    import sys
-    import builtins
-    # Force assignment using multiple methods to ensure exec() captures it
-    globals()['result'] = result
-    result = result  # Direct assignment
-    vars()['result'] = result  # Using vars()
-    # Final explicit assignment
-    result = {"status": result.get("status", "started"), "job_id": result.get("job_id"), "message": result.get("message", "utilization_sync started")} if isinstance(result, dict) else {"status": "started", "message": "utilization_sync started"}'''
+# Final explicit assignment - this is what exec() will capture
+# CRITICAL: This must be the last line - exec() captures this assignment
+# Force a new dict assignment to ensure exec() sees it
+if not isinstance(result, dict) or result is None:
+    result = {"status": "started", "message": "utilization_sync started"}
+else:
+    # Create explicit new dict to ensure exec() captures the assignment
+    result = {
+        "status": result.get("status", "started"),
+        "message": result.get("message", "utilization_sync started"),
+        "job_id": result.get("job_id")
+    }
+# Remove None values
+result = {k: v for k, v in result.items() if v is not None}'''
             
             utilization_sync_id = str(uuid.uuid4())
             now = datetime.datetime.now()
