@@ -1735,24 +1735,29 @@ def run_utilization_sync(job_id):
     # Start background job (this function checks if already running internally)
     result = None  # Initialize result variable
     try:
+        # Call start_background_job and ensure we get a result
         job_result = start_background_job(job_type, run_utilization_sync)
         
         # If already running, return that message, otherwise return the job result
-        if job_result and job_result.get("status") == "already_running":
+        if job_result and isinstance(job_result, dict) and job_result.get("status") == "already_running":
             result = {"message": "Utilization update already started", "status": "running"}
-        elif job_result:
+        elif job_result and isinstance(job_result, dict):
             result = job_result
         else:
             # Fallback if job_result is None or empty
-            result = {"message": "Utilization update started", "status": "started"}
+            result = {"message": "Utilization update started", "status": "started", "note": "job_result was invalid"}
     except Exception as e:
         # Ensure result is always set even if there's an error
         import traceback
-        result = {"message": f"Error starting utilization update: {str(e)}", "status": "error", "error": str(e)}
+        error_trace = traceback.format_exc()
+        result = {"message": f"Error starting utilization update: {str(e)}", "status": "error", "error": str(e), "traceback": error_trace[:500]}
     
-    # Ensure result is always a dict, never None
+    # Final safety check - ensure result is always a dict, never None
     if result is None:
-        result = {"message": "Utilization update started", "status": "started", "note": "result was None after execution"}'''
+        result = {"message": "Utilization update started", "status": "started", "note": "result was None after all checks"}
+    
+    # Explicitly ensure result is set in the context
+    result = result'''
             
             utilization_sync_id = str(uuid.uuid4())
             now = datetime.datetime.now()
