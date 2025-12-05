@@ -1731,37 +1731,26 @@ def run_utilization_sync(job_id):
             send_email("Utilization Update Failed", error_msg)
     
     # Start background job (this function checks if already running internally)
+    result = None  # Initialize result variable
     try:
         job_result = start_background_job(job_type, run_utilization_sync)
-        print(f"DEBUG: job_result = {job_result}")
-        print(f"DEBUG: type(job_result) = {type(job_result)}")
         
         # If already running, return that message, otherwise return the job result
         if job_result and job_result.get("status") == "already_running":
             result = {"message": "Utilization update already started", "status": "running"}
-            print(f"DEBUG: Set result to already_running message")
         elif job_result:
             result = job_result
-            print(f"DEBUG: Set result to job_result: {result}")
         else:
             # Fallback if job_result is None or empty
-            result = {"message": "Utilization update started", "status": "started", "note": "job_result was None or empty"}
-            print(f"DEBUG: Set result to fallback (job_result was None)")
+            result = {"message": "Utilization update started", "status": "started"}
     except Exception as e:
         # Ensure result is always set even if there's an error
         import traceback
         result = {"message": f"Error starting utilization update: {str(e)}", "status": "error", "error": str(e)}
-        print(f"DEBUG: Exception occurred: {e}")
-        traceback.print_exc()
     
     # Ensure result is always a dict, never None
-    print(f"DEBUG: Final result before check: {result}")
-    print(f"DEBUG: type(result) = {type(result)}")
     if result is None:
-        result = {"message": "Utilization update started", "status": "started", "note": "result was None after execution"}
-        print(f"DEBUG: Result was None, set to fallback")
-    
-    print(f"DEBUG: Final result: {result}")'''
+        result = {"message": "Utilization update started", "status": "started", "note": "result was None after execution"}'''
             
             utilization_sync_id = str(uuid.uuid4())
             now = datetime.datetime.now()
