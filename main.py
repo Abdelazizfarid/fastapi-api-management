@@ -573,6 +573,7 @@ def start_background_job(job_type: str, job_function):
         if existing_job:
             cur.close()
             return_db_connection(conn)
+            conn = None
             return {"status": "already_running", "message": f"{job_type} already started"}
         
         # Create new job atomically
@@ -583,14 +584,26 @@ def start_background_job(job_type: str, job_function):
         """, (job_id, job_type, "running", datetime.datetime.now()))
         conn.commit()
         cur.close()
+        return_db_connection(conn)
+        conn = None
     except Exception as e:
         if conn:
-            conn.rollback()
-            return_db_connection(conn)
+            try:
+                conn.rollback()
+            except:
+                pass
+            try:
+                return_db_connection(conn)
+            except:
+                pass
+            conn = None
         return {"status": "error", "message": f"Failed to create job: {str(e)}"}
     finally:
         if conn:
-            return_db_connection(conn)
+            try:
+                return_db_connection(conn)
+            except:
+                pass
     
     # Schedule background execution
     def run_job():
@@ -1477,223 +1490,224 @@ async def startup_event():
 job_type = "utilization_sync"
 
 # Configuration
-    DB_HOST = "odoo-marketing-cluster-instance-1.cvm3ri1wjhhb.us-east-1.rds.amazonaws.com"
-    DB_NAME = "beyond"
-    DB_USER = "odoo"
-    DB_PASSWORD = "PBLBOIq9HR0YVslM"
-    EMAIL_SENDER = "emaiiiltestt@gmail.com"
-    EMAIL_PASSWORD = "hkll zhrd zoia noos"
-    EMAIL_RECEIVER = "utilization@beyond-solution.com"
-    TOKEN_URL = "https://api-third-party.beyond-solution.com/api/v1/obtain-service-token"
-    BQ_URL = "https://bigquery.googleapis.com/bigquery/v2/projects/beyond-438113/queries"
-    BATCH_SIZE = 10000
-    
-    def run_utilization_sync(job_id):
-        """Run the utilization sync process"""
-        def send_email(subject, body):
-            try:
-                msg = EmailMessage()
-                msg["Subject"] = subject
-                msg["From"] = EMAIL_SENDER
-                msg["To"] = EMAIL_RECEIVER
-                msg.set_content(body)
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-                    smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
-                    smtp.send_message(msg)
-            except Exception as e:
-                add_progress_log(job_id, f"Error sending email: {e}", "error")
-        
+DB_HOST = "odoo-marketing-cluster-instance-1.cvm3ri1wjhhb.us-east-1.rds.amazonaws.com"
+DB_NAME = "beyond"
+DB_USER = "odoo"
+DB_PASSWORD = "PBLBOIq9HR0YVslM"
+EMAIL_SENDER = "emaiiiltestt@gmail.com"
+EMAIL_PASSWORD = "hkll zhrd zoia noos"
+EMAIL_RECEIVER = "utilization@beyond-solution.com"
+TOKEN_URL = "https://api-third-party.beyond-solution.com/api/v1/obtain-service-token"
+BQ_URL = "https://bigquery.googleapis.com/bigquery/v2/projects/beyond-438113/queries"
+BATCH_SIZE = 10000
+
+def run_utilization_sync(job_id):
+    """Run the utilization sync process"""
+    def send_email(subject, body):
         try:
-            add_progress_log(job_id, "Utilization update process started", "info", 1)
-            send_email("Utilization Update Started", "The utilization update process has started...")
-            
-            # Get token
-            add_progress_log(job_id, "Fetching authentication token...", "info", 2)
-            response = requests.get(TOKEN_URL)
-            response.raise_for_status()
-            token = response.json().get("token")
-            add_progress_log(job_id, "Token received successfully", "success", 3)
-            
-            # Connect to DB
-            add_progress_log(job_id, "Connecting to PostgreSQL database...", "info", 4)
-            conn = psycopg2.connect(
-                host=DB_HOST,
-                dbname=DB_NAME,
-                user=DB_USER,
-                password=DB_PASSWORD
-            )
-            cur = conn.cursor()
-            add_progress_log(job_id, "Connected to database successfully", "success", 5)
-            
-            # Delete old data
-            add_progress_log(job_id, "Deleting existing records from custom_policy_utilization...", "info", 6)
-            cur.execute("DELETE FROM custom_policy_utilization;")
-            conn.commit()
-            add_progress_log(job_id, "Old data cleared", "success", 7)
-            
-            # Load valid policy IDs
-            add_progress_log(job_id, "Loading valid policy IDs from custom_policy...", "info", 8)
-            cur.execute("SELECT id FROM custom_policy;")
-            valid_policy_ids = {str(row[0]) for row in cur.fetchall()}
-            add_progress_log(job_id, f"Loaded {len(valid_policy_ids)} valid policy IDs", "success", 9)
-            
-            def escape_sql_value(val):
-                if isinstance(val, str):
-                    return "'" + val.replace("'", "''") + "'"
-                elif val is None:
-                    return 'NULL'
-                else:
-                    return str(val)
-            
-            columns = [
-                'policy_id', 'tpa', 'account', 'claim_date', 'member_id',
-                'member_name', 'relation', 'age', 'chronic', 'disease_category',
-                'provider', 'provider_type', 'claim_id', 'show_button', 'amount',
-                'risk_carrier', 'month', 'services_group', 'icd_code', 'disease',
-                'total_amount', '"order"'
-            ]
-            
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-            
-            query_body = {
-                "query": "SELECT * FROM `beyond-438113.Utlization.Utilization_Data`",
-                "useLegacySql": False,
-                "maxResults": BATCH_SIZE
-            }
-            
-            page_token = None
-            total_records_bq = 0
-            total_inserted_records = 0
-            total_neglected_records = 0
-            neglected_policies = {}
-            batch_number = 0
-            
-            # Fetch + Insert loop
-            while True:
-                batch_number += 1
-                if page_token:
-                    query_body["pageToken"] = page_token
-                else:
-                    query_body.pop("pageToken", None)
-                
-                add_progress_log(job_id, f"Fetching batch #{batch_number} from BigQuery...", "info", 10 + batch_number)
-                response = requests.post(BQ_URL, headers=headers, json=query_body)
-                response.raise_for_status()
-                data = response.json()
-                
-                rows = data.get("rows", [])
-                if not rows:
-                    add_progress_log(job_id, "No more rows to process. Completed successfully.", "success")
-                    break
-                
-                schema = [f["name"] for f in data["schema"]["fields"]]
-                records = [dict(zip(schema, [c["v"] for c in row["f"]])) for row in rows]
-                
-                values_sql = []
-                batch_insert_count = 0
-                
-                for r in records:
-                    total_records_bq += 1
-                    raw_policy_id = r.get("Odoo_id")
-                    policy_id_str = str(raw_policy_id) if raw_policy_id is not None else None
-                    
-                    if not policy_id_str or policy_id_str not in valid_policy_ids:
-                        total_neglected_records += 1
-                        key = policy_id_str or "NULL"
-                        if key not in neglected_policies:
-                            neglected_policies[key] = {
-                                "odoo_ref": r.get("Odoo_Ref"),
-                                "count": 1,
-                            }
-                        else:
-                            neglected_policies[key]["count"] += 1
-                        continue
-                    
-                    row = [
-                        raw_policy_id,
-                        r.get("TPA", ""),
-                        r.get("ACCOUNT", ""),
-                        r.get("CLAIM_DATE", ""),
-                        r.get("MEMBER_ID", ""),
-                        r.get("MEMBER_NAME", ""),
-                        r.get("RELATION", ""),
-                        int(r.get("AGE", 0) or 0),
-                        r.get("CHRONIC", ""),
-                        r.get("Disease_category", ""),
-                        r.get("PROVIDER", ""),
-                        r.get("Provider_Type", ""),
-                        r.get("CLAIM_ID", ""),
-                        False,
-                        float(r.get("TOTAL_AMOUNT") or 0),
-                        r.get("RISK_CARRIER", ""),
-                        r.get("MONTH", ""),
-                        r.get("SERVICES_GROUP", ""),
-                        r.get("ICD_CODE", ""),
-                        r.get("DISEASE", ""),
-                        float(r.get("TOTAL_AMOUNT") or 0),
-                        "Auto"
-                    ]
-                    
-                    escaped = [escape_sql_value(v) for v in row]
-                    values_sql.append(f"({', '.join(escaped)})")
-                    batch_insert_count += 1
-                
-                if values_sql:
-                    insert_query = f"""
-                        INSERT INTO custom_policy_utilization (
-                            {', '.join(columns)}
-                        ) VALUES 
-                        {", ".join(values_sql)};
-                    """
-                    try:
-                        add_progress_log(job_id, f"Inserting {batch_insert_count} records from batch #{batch_number}...", "info")
-                        cur.execute(insert_query)
-                        conn.commit()
-                        total_inserted_records += batch_insert_count
-                        add_progress_log(job_id, f"Inserted batch #{batch_number}. Total inserted: {total_inserted_records}", "success")
-                    except Exception as e:
-                        add_progress_log(job_id, f"Error during insert batch #{batch_number}: {e}", "error")
-                        conn.rollback()
-                
-                page_token = data.get("pageToken")
-                if not page_token:
-                    add_progress_log(job_id, "Finished processing all batches.", "success")
-                    break
-            
-            # Cleanup
-            cur.close()
-            conn.close()
-            
-            total_neglected_unique_ids = len(neglected_policies)
-            
-            # Build summary
-            summary_lines = []
-            summary_lines.append("Utilization Sync Summary")
-            summary_lines.append("====================================")
-            summary_lines.append(f"Total records in BigQuery: {total_records_bq}")
-            summary_lines.append(f"Total inserted records in Odoo: {total_inserted_records}")
-            summary_lines.append(f"Total neglected records from BigQuery (policy not found in Odoo): {total_neglected_records}")
-            summary_lines.append(f"Total neglected unique Odoo_id values: {total_neglected_unique_ids}")
-            summary_lines.append("")
-            summary_lines.append("Neglected policy IDs (Odoo_id) with Odoo_Ref and neglected row count:")
-            summary_lines.append("Odoo_id | Odoo_Ref | Neglected_Rows")
-            summary_lines.append("------------------------------------")
-            for policy_id_str, info in neglected_policies.items():
-                odoo_ref = info.get("odoo_ref")
-                count = info.get("count", 0)
-                summary_lines.append(f"{policy_id_str} | {odoo_ref} | {count}")
-            
-            summary_text = "\\n".join(summary_lines)
-            add_progress_log(job_id, summary_text, "info")
-            add_progress_log(job_id, "Process completed successfully", "success")
-            
-            send_email("Utilization Update Done", summary_text)
-            update_job_status(job_id, "completed", result_summary=summary_text)
-            
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = EMAIL_SENDER
+            msg["To"] = EMAIL_RECEIVER
+            msg.set_content(body)
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+                smtp.send_message(msg)
         except Exception as e:
+            add_progress_log(job_id, f"Error sending email: {e}", "error")
+    
+    try:
+        add_progress_log(job_id, "Utilization update process started", "info", 1)
+        send_email("Utilization Update Started", "The utilization update process has started...")
+        
+        # Get token from TOKEN_URL (original logic - no bearer token needed)
+        add_progress_log(job_id, "Fetching authentication token from TOKEN_URL...", "info", 2)
+        response = requests.get(TOKEN_URL)
+        response.raise_for_status()
+        token = response.json().get("token")
+        add_progress_log(job_id, "Token received successfully", "success", 3)
+        
+        # Connect to DB
+        add_progress_log(job_id, "Connecting to PostgreSQL database...", "info", 4)
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
+        cur = conn.cursor()
+        add_progress_log(job_id, "Connected to database successfully", "success", 5)
+        
+        # Delete old data
+        add_progress_log(job_id, "Deleting existing records from custom_policy_utilization...", "info", 6)
+        cur.execute("DELETE FROM custom_policy_utilization;")
+        conn.commit()
+        add_progress_log(job_id, "Old data cleared", "success", 7)
+        
+        # Load valid policy IDs
+        add_progress_log(job_id, "Loading valid policy IDs from custom_policy...", "info", 8)
+        cur.execute("SELECT id FROM custom_policy;")
+        valid_policy_ids = {str(row[0]) for row in cur.fetchall()}
+        add_progress_log(job_id, f"Loaded {len(valid_policy_ids)} valid policy IDs", "success", 9)
+        
+        def escape_sql_value(val):
+            if isinstance(val, str):
+                return "'" + val.replace("'", "''") + "'"
+            elif val is None:
+                return 'NULL'
+            else:
+                return str(val)
+        
+        columns = [
+            'policy_id', 'tpa', 'account', 'claim_date', 'member_id',
+            'member_name', 'relation', 'age', 'chronic', 'disease_category',
+            'provider', 'provider_type', 'claim_id', 'show_button', 'amount',
+            'risk_carrier', 'month', 'services_group', 'icd_code', 'disease',
+            'total_amount', '"order"'
+        ]
+        
+        # Use fetched token for BigQuery requests
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        query_body = {
+            "query": "SELECT * FROM `beyond-438113.Utlization.Utilization_Data`",
+            "useLegacySql": False,
+            "maxResults": BATCH_SIZE
+        }
+        
+        page_token = None
+        total_records_bq = 0
+        total_inserted_records = 0
+        total_neglected_records = 0
+        neglected_policies = {}
+        batch_number = 0
+        
+        # Fetch + Insert loop
+        while True:
+            batch_number += 1
+            if page_token:
+                query_body["pageToken"] = page_token
+            else:
+                query_body.pop("pageToken", None)
+            
+            add_progress_log(job_id, f"Fetching batch #{batch_number} from BigQuery...", "info", 10 + batch_number)
+            response = requests.post(BQ_URL, headers=headers, json=query_body)
+            response.raise_for_status()
+            data = response.json()
+            
+            rows = data.get("rows", [])
+            if not rows:
+                add_progress_log(job_id, "No more rows to process. Completed successfully.", "success")
+                break
+            
+            schema = [f["name"] for f in data["schema"]["fields"]]
+            records = [dict(zip(schema, [c["v"] for c in row["f"]])) for row in rows]
+            
+            values_sql = []
+            batch_insert_count = 0
+            
+            for r in records:
+                total_records_bq += 1
+                raw_policy_id = r.get("Odoo_id")
+                policy_id_str = str(raw_policy_id) if raw_policy_id is not None else None
+                
+                if not policy_id_str or policy_id_str not in valid_policy_ids:
+                    total_neglected_records += 1
+                    key = policy_id_str or "NULL"
+                    if key not in neglected_policies:
+                        neglected_policies[key] = {
+                            "odoo_ref": r.get("Odoo_Ref"),
+                            "count": 1,
+                        }
+                    else:
+                        neglected_policies[key]["count"] += 1
+                    continue
+                
+                row = [
+                    raw_policy_id,
+                    r.get("TPA", ""),
+                    r.get("ACCOUNT", ""),
+                    r.get("CLAIM_DATE", ""),
+                    r.get("MEMBER_ID", ""),
+                    r.get("MEMBER_NAME", ""),
+                    r.get("RELATION", ""),
+                    int(r.get("AGE", 0) or 0),
+                    r.get("CHRONIC", ""),
+                    r.get("Disease_category", ""),
+                    r.get("PROVIDER", ""),
+                    r.get("Provider_Type", ""),
+                    r.get("CLAIM_ID", ""),
+                    False,
+                    float(r.get("TOTAL_AMOUNT") or 0),
+                    r.get("RISK_CARRIER", ""),
+                    r.get("MONTH", ""),
+                    r.get("SERVICES_GROUP", ""),
+                    r.get("ICD_CODE", ""),
+                    r.get("DISEASE", ""),
+                    float(r.get("TOTAL_AMOUNT") or 0),
+                    "Auto"
+                ]
+                
+                escaped = [escape_sql_value(v) for v in row]
+                values_sql.append(f"({', '.join(escaped)})")
+                batch_insert_count += 1
+            
+            if values_sql:
+                insert_query = f"""
+                    INSERT INTO custom_policy_utilization (
+                        {', '.join(columns)}
+                    ) VALUES 
+                    {", ".join(values_sql)};
+                """
+                try:
+                    add_progress_log(job_id, f"Inserting {batch_insert_count} records from batch #{batch_number}...", "info")
+                    cur.execute(insert_query)
+                    conn.commit()
+                    total_inserted_records += batch_insert_count
+                    add_progress_log(job_id, f"Inserted batch #{batch_number}. Total inserted: {total_inserted_records}", "success")
+                except Exception as e:
+                    add_progress_log(job_id, f"Error during insert batch #{batch_number}: {e}", "error")
+                    conn.rollback()
+            
+            page_token = data.get("pageToken")
+            if not page_token:
+                add_progress_log(job_id, "Finished processing all batches.", "success")
+                break
+        
+        # Cleanup
+        cur.close()
+        conn.close()
+        
+        total_neglected_unique_ids = len(neglected_policies)
+        
+        # Build summary
+        summary_lines = []
+        summary_lines.append("Utilization Sync Summary")
+        summary_lines.append("====================================")
+        summary_lines.append(f"Total records in BigQuery: {total_records_bq}")
+        summary_lines.append(f"Total inserted records in Odoo: {total_inserted_records}")
+        summary_lines.append(f"Total neglected records from BigQuery (policy not found in Odoo): {total_neglected_records}")
+        summary_lines.append(f"Total neglected unique Odoo_id values: {total_neglected_unique_ids}")
+        summary_lines.append("")
+        summary_lines.append("Neglected policy IDs (Odoo_id) with Odoo_Ref and neglected row count:")
+        summary_lines.append("Odoo_id | Odoo_Ref | Neglected_Rows")
+        summary_lines.append("------------------------------------")
+        for policy_id_str, info in neglected_policies.items():
+            odoo_ref = info.get("odoo_ref")
+            count = info.get("count", 0)
+            summary_lines.append(f"{policy_id_str} | {odoo_ref} | {count}")
+        
+        summary_text = "\\n".join(summary_lines)
+        add_progress_log(job_id, summary_text, "info")
+        add_progress_log(job_id, "Process completed successfully", "success")
+        
+        send_email("Utilization Update Done", summary_text)
+        update_job_status(job_id, "completed", result_summary=summary_text)
+        
+    except Exception as e:
             error_msg = f"Error in utilization sync: {str(e)}\\n{traceback.format_exc()}"
             add_progress_log(job_id, error_msg, "error")
             update_job_status(job_id, "failed", error_message=error_msg)
