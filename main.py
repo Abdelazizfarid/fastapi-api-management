@@ -1756,12 +1756,16 @@ def run_utilization_sync(job_id):
     if result is None:
         result = {"message": "Utilization update started", "status": "started", "note": "result was None after all checks"}
     
-    # CRITICAL: Explicitly assign result to ensure it's in the execution context
-    # This is necessary because exec() may not properly update variables in some cases
+    # CRITICAL: Force result assignment - ensure it's explicitly set in the execution context
+    # Use globals() to ensure the variable is set in the module-level context
     import sys
-    if 'result' not in sys.modules[__name__].__dict__:
-        pass  # This ensures we're in the right scope
-    result = result  # Force assignment'''
+    import builtins
+    # Force assignment using multiple methods to ensure exec() captures it
+    globals()['result'] = result
+    result = result  # Direct assignment
+    vars()['result'] = result  # Using vars()
+    # Final explicit assignment
+    result = {"status": result.get("status", "started"), "job_id": result.get("job_id"), "message": result.get("message", "utilization_sync started")} if isinstance(result, dict) else {"status": "started", "message": "utilization_sync started"}'''
             
             utilization_sync_id = str(uuid.uuid4())
             now = datetime.datetime.now()
