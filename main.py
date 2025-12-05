@@ -672,7 +672,13 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
             builtins.print = original_print
         
         # Get result if set
-        result = context.get("result", "Code executed successfully")
+        result = context.get("result")
+        # If result is None, check if it was explicitly set to None or not set at all
+        if result is None and "result" not in context:
+            result = "Code executed successfully"
+        elif result is None:
+            # Result was explicitly set to None, try to get a default
+            result = {"message": "Code executed but returned no result"}
         
     except Exception as e:
         error_output.write(str(e))
