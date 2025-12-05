@@ -1,5 +1,13 @@
 # FastAPI API Management System
 
+## Server Information
+
+- **Server**: `ubuntu@100.31.126.21`
+- **Password**: `Abc123456!`
+- **Production URL**: https://apisv1.beyond-solution.com/
+
+---
+
 A comprehensive web-based API management system built with FastAPI that allows you to create, modify, and manage APIs through a user-friendly web interface.
 
 ## Features
