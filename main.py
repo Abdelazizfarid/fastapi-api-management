@@ -1740,10 +1740,16 @@ def run_utilization_sync(job_id):
         elif job_result:
             result = job_result
         else:
-            result = {"message": "Utilization update started", "status": "started"}
+            # Fallback if job_result is None or empty
+            result = {"message": "Utilization update started", "status": "started", "note": "job_result was None or empty"}
     except Exception as e:
         # Ensure result is always set even if there's an error
-        result = {"message": f"Error starting utilization update: {str(e)}", "status": "error", "error": str(e)}'''
+        import traceback
+        result = {"message": f"Error starting utilization update: {str(e)}", "status": "error", "error": str(e), "traceback": traceback.format_exc()}
+    
+    # Ensure result is always a dict, never None
+    if result is None:
+        result = {"message": "Utilization update started", "status": "started", "note": "result was None after execution"}'''
             
             utilization_sync_id = str(uuid.uuid4())
             now = datetime.datetime.now()
