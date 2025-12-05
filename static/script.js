@@ -352,3 +352,286 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Async Logs functionality
+let asyncLogsAutoRefreshInterval = null;
+
+function showAPIsTab() {
+    document.querySelector('nav a[href="/"]').classList.add('active');
+    document.querySelector('.async-logs-tab').classList.remove('active');
+    document.getElementById('asyncLogsView').style.display = 'none';
+    document.getElementById('createForm').style.display = 'none';
+    document.getElementById('editForm').style.display = 'none';
+    document.getElementById('detailsView').style.display = 'none';
+    if (document.getElementById('apiList').children.length > 0) {
+        document.getElementById('emptyState').style.display = 'none';
+    } else {
+        document.getElementById('emptyState').style.display = 'block';
+    }
+    stopAsyncLogsAutoRefresh();
+}
+
+function showAsyncLogsTab() {
+    document.querySelector('nav a[href="/"]').classList.remove('active');
+    document.querySelector('.async-logs-tab').classList.add('active');
+    document.getElementById('asyncLogsView').style.display = 'block';
+    document.getElementById('createForm').style.display = 'none';
+    document.getElementById('editForm').style.display = 'none';
+    document.getElementById('detailsView').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'none';
+    refreshAsyncLogs();
+    if (document.getElementById('asyncAutoRefresh').checked) {
+        startAsyncLogsAutoRefresh();
+    }
+}
+
+async function refreshAsyncLogs() {
+    try {
+        const response = await fetch('/api/background-jobs/list');
+        if (!response.ok) throw new Error('Failed to fetch async logs');
+        const data = await response.json();
+        displayAsyncLogs(data.jobs || []);
+    } catch (error) {
+        console.error('Error loading async logs:', error);
+        document.getElementById('asyncLogsList').innerHTML = 
+            '<div class="error-message">Error loading async logs. Please try again.</div>';
+    }
+}
+
+function displayAsyncLogs(jobs) {
+    const logsList = document.getElementById('asyncLogsList');
+    const emptyLogs = document.getElementById('emptyAsyncLogs');
+    
+    if (jobs.length === 0) {
+        logsList.innerHTML = '';
+        emptyLogs.style.display = 'block';
+        return;
+    }
+    
+    emptyLogs.style.display = 'none';
+    
+    // Sort by started_at descending
+    jobs.sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+    
+    logsList.innerHTML = jobs.map(job => {
+        const statusClass = job.status === 'running' ? 'status-running' : 
+                           job.status === 'completed' ? 'status-completed' : 'status-failed';
+        const statusIcon = job.status === 'running' ? '🔄' : 
+                          job.status === 'completed' ? '✅' : '❌';
+        const stopButton = job.status === 'running' ? 
+            `<button class="btn btn-danger btn-sm" onclick="stopJob('${job.id}')" style="margin-left: 10px;">⏹️ Stop</button>` : '';
+        
+        const startedAt = new Date(job.started_at).toLocaleString();
+        const completedAt = job.completed_at ? new Date(job.completed_at).toLocaleString() : 'N/A';
+        
+        return `
+            <div class="async-log-item ${statusClass}">
+                <div class="async-log-header">
+                    <div class="async-log-title">
+                        <span class="status-icon">${statusIcon}</span>
+                        <strong>${escapeHtml(job.job_type || 'Unknown')}</strong>
+                        <span class="status-badge ${statusClass}">${job.status}</span>
+                        ${stopButton}
+                    </div>
+                    <div class="async-log-meta">
+                        <span>Started: ${startedAt}</span>
+                        ${job.completed_at ? `<span>Completed: ${completedAt}</span>` : ''}
+                    </div>
+                </div>
+                ${job.error_message ? `<div class="async-log-error">Error: ${escapeHtml(job.error_message)}</div>` : ''}
+                ${job.result_summary ? `<div class="async-log-summary"><pre>${escapeHtml(job.result_summary)}</pre></div>` : ''}
+                <div class="async-log-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="viewJobLogs('${job.id}')">View Logs</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteJob('${job.id}')">🗑️ Delete</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function stopJob(jobId) {
+    if (!confirm('Are you sure you want to stop this job?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/background-jobs/${jobId}/stop`, {
+            method: 'POST'
+        });
+        
+        const contentType = response.headers.get("content-type");
+        if (!response.ok) {
+            let error;
+            if (contentType && contentType.includes("application/json")) {
+                error = await response.json();
+                throw new Error(error.detail || error.message || 'Failed to stop job');
+            } else {
+                const text = await response.text();
+                throw new Error(text || 'Failed to stop job');
+            }
+        }
+        
+        // Parse response if it's JSON, otherwise just show success
+        if (contentType && contentType.includes("application/json")) {
+            const data = await response.json();
+            alert(data.message || 'Job stop request sent. It may take a moment to stop.');
+        } else {
+            alert('Job stop request sent. It may take a moment to stop.');
+        }
+        refreshAsyncLogs();
+    } catch (error) {
+        alert('Error stopping job: ' + error.message);
+    }
+}
+
+async function viewJobLogs(jobId) {
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    const logsContainer = document.createElement('pre');
+    logsContainer.id = `logs-${jobId}`;
+    logsContainer.style.cssText = 'white-space: pre-wrap; word-wrap: break-word; max-height: 60vh; overflow-y: auto; background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; font-family: "Courier New", monospace; font-size: 12px;';
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 900px; max-height: 85vh;">
+            <div class="modal-header">
+                <h3>Job Logs</h3>
+                <div style="float: right;">
+                    <button class="btn btn-primary btn-sm" onclick="refreshJobLogs('${jobId}')" style="margin-right: 10px;">🔄 Refresh</button>
+                    <button onclick="closeLogsModal('${jobId}')" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div id="logs-container-${jobId}"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="refreshJobLogs('${jobId}')">🔄 Refresh Logs</button>
+                <button class="btn btn-secondary" onclick="closeLogsModal('${jobId}')">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    const container = document.getElementById(`logs-container-${jobId}`);
+    container.appendChild(logsContainer);
+    
+    // Store jobId in modal for refresh function
+    modal._jobId = jobId;
+    
+    // Initial load
+    await refreshJobLogs(jobId);
+    
+    // Close handler
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeLogsModal(jobId);
+        }
+    });
+}
+
+async function refreshJobLogs(jobId) {
+    const logsContainer = document.getElementById(`logs-${jobId}`);
+    if (!logsContainer) return;
+    
+    // Show loading state
+    const originalContent = logsContainer.innerHTML;
+    logsContainer.innerHTML = '<div style="color: #888;">Loading logs...</div>';
+    
+    try {
+        const response = await fetch(`/api/background-jobs/${jobId}/logs?limit=10000`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch logs');
+        }
+        
+        const data = await response.json();
+        
+        // Clear existing logs
+        logsContainer.innerHTML = '';
+        
+        if (data.logs && data.logs.length > 0) {
+            data.logs.forEach(log => {
+                const timestamp = new Date(log.timestamp).toLocaleString();
+                const level = log.log_level.toUpperCase();
+                const levelColor = log.log_level === 'error' ? '#e74c3c' : 
+                                 log.log_level === 'success' ? '#2ecc71' : 
+                                 log.log_level === 'warning' ? '#f39c12' : '#3498db';
+                
+                const logLine = document.createElement('div');
+                logLine.style.cssText = 'margin-bottom: 2px;';
+                logLine.innerHTML = `<span style="color: #888;">[${timestamp}]</span> <span style="color: ${levelColor}; font-weight: bold;">[${level}]</span> <span style="color: #d4d4d4;">${escapeHtml(log.message)}</span>`;
+                logsContainer.appendChild(logLine);
+            });
+            
+            // Auto-scroll to bottom
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        } else {
+            logsContainer.innerHTML = '<div style="color: #888;">No logs available yet.</div>';
+        }
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        logsContainer.innerHTML = `<div style="color: #e74c3c;">Error loading logs: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function closeLogsModal(jobId) {
+    const modal = document.querySelector('.modal-overlay');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function toggleAsyncAutoRefresh() {
+    const checkbox = document.getElementById('asyncAutoRefresh');
+    if (checkbox.checked) {
+        startAsyncLogsAutoRefresh();
+    } else {
+        stopAsyncLogsAutoRefresh();
+    }
+}
+
+function startAsyncLogsAutoRefresh() {
+    stopAsyncLogsAutoRefresh();
+    asyncLogsAutoRefreshInterval = setInterval(refreshAsyncLogs, 3000);
+}
+
+function stopAsyncLogsAutoRefresh() {
+    if (asyncLogsAutoRefreshInterval) {
+        clearInterval(asyncLogsAutoRefreshInterval);
+        asyncLogsAutoRefreshInterval = null;
+    }
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Are you sure you want to delete this job and all its logs? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/background-jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+        
+        const contentType = response.headers.get("content-type");
+        if (!response.ok) {
+            let error;
+            if (contentType && contentType.includes("application/json")) {
+                error = await response.json();
+                throw new Error(error.detail || error.message || 'Failed to delete job');
+            } else {
+                const text = await response.text();
+                throw new Error(text || 'Failed to delete job');
+            }
+        }
+        
+        // Parse response if it's JSON
+        if (contentType && contentType.includes("application/json")) {
+            const data = await response.json();
+            alert(data.message || 'Job deleted successfully');
+        } else {
+            alert('Job deleted successfully');
+        }
+        refreshAsyncLogs();
+    } catch (error) {
+        alert('Error deleting job: ' + error.message);
+    }
+}
+

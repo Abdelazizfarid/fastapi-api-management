@@ -454,3 +454,218 @@ nav a:hover, nav a.active {
         margin: 0;
     }
 }
+
+/* Async Logs Styles */
+.async-logs-container {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.async-logs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #eee;
+}
+
+.async-logs-header h2 {
+    margin: 0;
+    color: #2c3e50;
+}
+
+.async-logs-controls {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.async-logs-controls label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+}
+
+.async-logs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.async-log-item {
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    transition: all 0.3s;
+}
+
+.async-log-item:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.async-log-item.status-running {
+    border-left: 4px solid #3498db;
+}
+
+.async-log-item.status-completed {
+    border-left: 4px solid #2ecc71;
+}
+
+.async-log-item.status-failed {
+    border-left: 4px solid #e74c3c;
+}
+
+.async-log-header {
+    margin-bottom: 10px;
+}
+
+.async-log-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.status-icon {
+    font-size: 20px;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-badge.status-running {
+    background: #3498db;
+    color: white;
+}
+
+.status-badge.status-completed {
+    background: #2ecc71;
+    color: white;
+}
+
+.status-badge.status-failed {
+    background: #e74c3c;
+    color: white;
+}
+
+.async-log-meta {
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
+}
+
+.async-log-error {
+    background: #fee;
+    border: 1px solid #fcc;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+    color: #c33;
+    font-size: 14px;
+}
+
+.async-log-summary {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+    font-size: 12px;
+}
+
+.async-log-summary pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.async-log-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    max-width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #eee;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #2c3e50;
+}
+
+.modal-body {
+    margin: 15px 0;
+}
+
+.modal-body pre {
+    background: #f5f5f5;
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.modal-footer {
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 2px solid #eee;
+    text-align: right;
+}
+
+.error-message {
+    background: #fee;
+    border: 1px solid #fcc;
+    border-radius: 4px;
+    padding: 15px;
+    color: #c33;
+    text-align: center;
+}

@@ -4,3 +4,4 @@ psycopg2-binary==2.9.11
 python-multipart==0.0.20
 pydantic==2.12.5
 starlette==0.50.0
+requests==2.31.0

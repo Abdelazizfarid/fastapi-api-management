@@ -19,6 +19,10 @@ import concurrent.futures
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
+import requests
+import smtplib
+from email.message import EmailMessage
+from fastapi import BackgroundTasks
 
 
 # Session storage
@@ -466,6 +470,142 @@ class LoggingStringIO(StringIO):
             except Exception as e:
                 pass  # Don't fail if logging fails
 
+# Global background task queue
+background_task_queue = []
+
+# === BACKGROUND JOB TRACKING FUNCTIONS ===
+def add_progress_log(job_id: str, message: str, log_level: str = "info", step_number: int = None):
+    """Add a progress log entry for a background job"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO job_progress_logs (job_id, log_level, message, step_number)
+            VALUES (%s, %s, %s, %s)
+        """, (job_id, log_level, message, step_number))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        print(f"Error adding progress log: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+def update_job_status(job_id: str, status: str, error_message: str = None, result_summary: str = None):
+    """Update the status of a background job"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if status == "completed":
+            cur.execute("""
+                UPDATE background_jobs 
+                SET status = %s, completed_at = %s, result_summary = %s
+                WHERE id = %s
+            """, (status, datetime.datetime.now(), result_summary, job_id))
+        elif status == "failed":
+            cur.execute("""
+                UPDATE background_jobs 
+                SET status = %s, completed_at = %s, error_message = %s
+                WHERE id = %s
+            """, (status, datetime.datetime.now(), error_message, job_id))
+        else:
+            cur.execute("""
+                UPDATE background_jobs 
+                SET status = %s
+                WHERE id = %s
+            """, (status, job_id))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        print(f"Error updating job status: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+def check_job_running(job_type: str) -> bool:
+    """Check if a job of this type is currently running"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id FROM background_jobs 
+            WHERE job_type = %s AND status = 'running'
+            ORDER BY started_at DESC
+            LIMIT 1
+        """, (job_type,))
+        result = cur.fetchone()
+        cur.close()
+        return result is not None
+    except Exception as e:
+        print(f"Error checking job status: {e}")
+        return False
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+# Background job helper functions (available in Python code execution context)
+def start_background_job(job_type: str, job_function):
+    """Start a background job - available in Python code execution context"""
+    global background_task_queue
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Atomic check-and-create: Check if running and create in one transaction
+        # First, try to find a running job
+        cur.execute("""
+            SELECT id FROM background_jobs 
+            WHERE job_type = %s AND status = 'running'
+            ORDER BY started_at DESC
+            LIMIT 1
+            FOR UPDATE
+        """, (job_type,))
+        existing_job = cur.fetchone()
+        
+        if existing_job:
+            cur.close()
+            return_db_connection(conn)
+            return {"status": "already_running", "message": f"{job_type} already started"}
+        
+        # Create new job atomically
+        job_id = str(uuid.uuid4())
+        cur.execute("""
+            INSERT INTO background_jobs (id, job_type, status, started_at)
+            VALUES (%s, %s, %s, %s)
+        """, (job_id, job_type, "running", datetime.datetime.now()))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            return_db_connection(conn)
+        return {"status": "error", "message": f"Failed to create job: {str(e)}"}
+    finally:
+        if conn:
+            return_db_connection(conn)
+    
+    # Schedule background execution
+    def run_job():
+        try:
+            job_function(job_id)
+        except Exception as e:
+            update_job_status(job_id, "failed", error_message=str(e))
+    
+    # Start in background thread
+    thread = threading.Thread(target=run_job, daemon=True)
+    thread.start()
+    background_task_queue.append(thread)
+    
+    return {"status": "started", "job_id": job_id, "message": f"{job_type} started"}
+
 # Execute Python code safely
 def execute_python_code(code: str, request_data: Dict = None, log_id: str = None) -> Dict[str, Any]:
     """Execute Python code and return result"""
@@ -481,12 +621,23 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
         sys.stdout = output
         sys.stderr = error_output
         
-        # Create execution context
+        # Create execution context with helper functions
         context = {
             "request_data": request_data or {},
             "json": json,
             "datetime": datetime,
-            "result": None
+            "result": None,
+            "start_background_job": start_background_job,
+            "add_progress_log": add_progress_log,
+            "update_job_status": update_job_status,
+            "check_job_running": check_job_running,
+            "threading": threading,
+            "asyncio": asyncio,
+            "requests": requests,
+            "smtplib": smtplib,
+            "EmailMessage": EmailMessage,
+            "psycopg2": psycopg2,
+            "traceback": traceback
         }
         
         # Execute code with unbuffered output for real-time prints
@@ -975,6 +1126,279 @@ async def clear_logs(request: Request, auth: bool = Depends(require_auth)):
             return_db_connection(conn)
         raise HTTPException(status_code=500, detail=f"Failed to clear logs: {str(e)}")
 
+# === BACKGROUND JOBS API ENDPOINTS ===
+@app.get("/api/background-jobs/list")
+async def list_background_jobs(request: Request, auth: bool = Depends(require_auth)):
+    """List all background jobs"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, job_type, status, started_at, completed_at, error_message, result_summary
+            FROM background_jobs
+            ORDER BY started_at DESC
+            LIMIT 100
+        """)
+        jobs = cur.fetchall()
+        cur.close()
+        return {"jobs": [dict(job) for job in jobs]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting jobs: {str(e)}")
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+@app.delete("/api/background-jobs/{job_id}")
+async def delete_background_job(job_id: str, request: Request, auth: bool = Depends(require_auth)):
+    """Delete a background job and all its logs"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Verify job exists
+        cur.execute("SELECT id FROM background_jobs WHERE id = %s", (job_id,))
+        if not cur.fetchone():
+            cur.close()
+            return_db_connection(conn)
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Delete job (logs will be deleted automatically due to CASCADE)
+        cur.execute("DELETE FROM background_jobs WHERE id = %s", (job_id,))
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+        conn = None
+        
+        # Return success response
+        return JSONResponse(
+            status_code=200,
+            content={"message": "Job and all its logs deleted successfully"}
+        )
+    except HTTPException:
+        if conn:
+            try:
+                return_db_connection(conn)
+            except:
+                pass
+        raise
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+            try:
+                return_db_connection(conn)
+            except:
+                pass
+        raise HTTPException(status_code=500, detail=f"Error deleting job: {str(e)}")
+
+@app.get("/api/background-jobs/{job_id}/logs")
+async def get_job_logs(job_id: str, limit: int = 1000, request: Request = None, auth: bool = Depends(require_auth)):
+    """Get logs for a specific background job"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Verify job exists
+        cur.execute("SELECT id FROM background_jobs WHERE id = %s", (job_id,))
+        if not cur.fetchone():
+            cur.close()
+            return_db_connection(conn)
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Get logs
+        cur.execute("""
+            SELECT id, timestamp, log_level, message, step_number
+            FROM job_progress_logs
+            WHERE job_id = %s
+            ORDER BY timestamp ASC, step_number ASC
+            LIMIT %s
+        """, (job_id, limit))
+        logs = cur.fetchall()
+        cur.close()
+        
+        return {
+            "job_id": job_id,
+            "logs": [dict(log) for log in logs]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting logs: {str(e)}")
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+@app.get("/api/background-jobs/{job_id}/logs/stream")
+async def stream_job_logs(job_id: str, request: Request, auth: bool = Depends(require_auth)):
+    """Stream logs for a specific background job in real-time using Server-Sent Events"""
+    import asyncio
+    
+    # Verify job exists
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM background_jobs WHERE id = %s", (job_id,))
+        if not cur.fetchone():
+            cur.close()
+            return_db_connection(conn)
+            raise HTTPException(status_code=404, detail="Job not found")
+        cur.close()
+        return_db_connection(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            return_db_connection(conn)
+        raise HTTPException(status_code=500, detail=f"Error verifying job: {str(e)}")
+    
+    async def event_generator():
+        last_log_id = None
+        error_count = 0
+        max_errors = 10
+        
+        while True:
+            # Check if client disconnected
+            if await request.is_disconnected():
+                break
+            
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Get new logs since last check
+                if last_log_id:
+                    cur.execute("""
+                        SELECT id, timestamp, log_level, message, step_number
+                        FROM job_progress_logs
+                        WHERE job_id = %s AND id > %s
+                        ORDER BY timestamp ASC, step_number ASC
+                    """, (job_id, last_log_id))
+                else:
+                    # First time - get all logs
+                    cur.execute("""
+                        SELECT id, timestamp, log_level, message, step_number
+                        FROM job_progress_logs
+                        WHERE job_id = %s
+                        ORDER BY timestamp ASC, step_number ASC
+                    """, (job_id,))
+                
+                new_logs = cur.fetchall()
+                cur.close()
+                return_db_connection(conn)
+                conn = None
+                
+                # Reset error count on success
+                error_count = 0
+                
+                # Send new logs
+                if new_logs:
+                    logs_data = [dict(log) for log in new_logs]
+                    # Update last_log_id to the last log's id
+                    last_log_id = logs_data[-1].get('id')
+                    
+                    yield f"data: {json.dumps({'logs': logs_data})}\n\n"
+                else:
+                    # Send keep-alive ping to prevent connection timeout
+                    yield f": keep-alive\n\n"
+                
+                # Check if job is still running
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT status FROM background_jobs WHERE id = %s", (job_id,))
+                job_status = cur.fetchone()
+                cur.close()
+                return_db_connection(conn)
+                conn = None
+                
+                if job_status and job_status[0] not in ['running']:
+                    # Job completed or failed, send final update and close
+                    yield f"data: {json.dumps({'status': 'completed', 'job_status': job_status[0]})}\n\n"
+                    break
+                
+            except Exception as e:
+                error_count += 1
+                print(f"Error in log stream: {e}")
+                
+                # Send error but don't break unless too many errors
+                try:
+                    yield f"data: {json.dumps({'error': str(e), 'error_count': error_count})}\n\n"
+                except:
+                    pass
+                
+                if error_count >= max_errors:
+                    yield f"data: {json.dumps({'status': 'error', 'message': 'Too many errors, closing connection'})}\n\n"
+                    break
+                
+                # Clean up connection on error
+                if conn:
+                    try:
+                        return_db_connection(conn)
+                    except:
+                        pass
+                    conn = None
+            
+            await asyncio.sleep(0.5)  # Check every 500ms for real-time updates
+    
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.post("/api/background-jobs/{job_id}/stop")
+async def stop_background_job(job_id: str, request: Request, auth: bool = Depends(require_auth)):
+    """Stop a running background job"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get job info
+        cur.execute("""
+            SELECT id, job_type, status FROM background_jobs WHERE id = %s
+        """, (job_id,))
+        job = cur.fetchone()
+        
+        if not job:
+            cur.close()
+            return_db_connection(conn)
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job_dict = dict(job)
+        
+        if job_dict["status"] != "running":
+            cur.close()
+            return_db_connection(conn)
+            return JSONResponse(content={"message": f"Job is not running (status: {job_dict['status']})", "status": job_dict["status"]})
+        
+        # Update job status to cancelled
+        cur.execute("""
+            UPDATE background_jobs 
+            SET status = 'failed', completed_at = %s, error_message = %s
+            WHERE id = %s
+        """, (datetime.datetime.now(), "Job stopped by user", job_id))
+        conn.commit()
+        
+        # Add log entry
+        add_progress_log(job_id, "Job stopped by user", "warning")
+        
+        cur.close()
+        return_db_connection(conn)
+        
+        return JSONResponse(content={"message": "Job stop request processed", "job_id": job_id})
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            return_db_connection(conn)
+        raise HTTPException(status_code=500, detail=f"Error stopping job: {str(e)}")
+    finally:
+        if conn:
+            return_db_connection(conn)
+
 @app.post("/api/manage/restart")
 async def restart_server(request: Request, auth: bool = Depends(require_auth)):
     """Restart the FastAPI server"""
@@ -1041,6 +1465,269 @@ async def startup_event():
             return_db_connection(conn)
     
     load_apis()
+    
+    # Add utilization sync API to database if not exists
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM apis WHERE path = %s AND method = %s", ("/api/utilization/sync", "POST"))
+        if not cur.fetchone():
+            utilization_sync_code = '''# Utilization Sync API - Runs in background
+job_type = "utilization_sync"
+
+# Configuration
+    DB_HOST = "odoo-marketing-cluster-instance-1.cvm3ri1wjhhb.us-east-1.rds.amazonaws.com"
+    DB_NAME = "beyond"
+    DB_USER = "odoo"
+    DB_PASSWORD = "PBLBOIq9HR0YVslM"
+    EMAIL_SENDER = "emaiiiltestt@gmail.com"
+    EMAIL_PASSWORD = "hkll zhrd zoia noos"
+    EMAIL_RECEIVER = "utilization@beyond-solution.com"
+    TOKEN_URL = "https://api-third-party.beyond-solution.com/api/v1/obtain-service-token"
+    BQ_URL = "https://bigquery.googleapis.com/bigquery/v2/projects/beyond-438113/queries"
+    BATCH_SIZE = 10000
+    
+    def run_utilization_sync(job_id):
+        """Run the utilization sync process"""
+        def send_email(subject, body):
+            try:
+                msg = EmailMessage()
+                msg["Subject"] = subject
+                msg["From"] = EMAIL_SENDER
+                msg["To"] = EMAIL_RECEIVER
+                msg.set_content(body)
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                    smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+                    smtp.send_message(msg)
+            except Exception as e:
+                add_progress_log(job_id, f"Error sending email: {e}", "error")
+        
+        try:
+            add_progress_log(job_id, "Utilization update process started", "info", 1)
+            send_email("Utilization Update Started", "The utilization update process has started...")
+            
+            # Get token
+            add_progress_log(job_id, "Fetching authentication token...", "info", 2)
+            response = requests.get(TOKEN_URL)
+            response.raise_for_status()
+            token = response.json().get("token")
+            add_progress_log(job_id, "Token received successfully", "success", 3)
+            
+            # Connect to DB
+            add_progress_log(job_id, "Connecting to PostgreSQL database...", "info", 4)
+            conn = psycopg2.connect(
+                host=DB_HOST,
+                dbname=DB_NAME,
+                user=DB_USER,
+                password=DB_PASSWORD
+            )
+            cur = conn.cursor()
+            add_progress_log(job_id, "Connected to database successfully", "success", 5)
+            
+            # Delete old data
+            add_progress_log(job_id, "Deleting existing records from custom_policy_utilization...", "info", 6)
+            cur.execute("DELETE FROM custom_policy_utilization;")
+            conn.commit()
+            add_progress_log(job_id, "Old data cleared", "success", 7)
+            
+            # Load valid policy IDs
+            add_progress_log(job_id, "Loading valid policy IDs from custom_policy...", "info", 8)
+            cur.execute("SELECT id FROM custom_policy;")
+            valid_policy_ids = {str(row[0]) for row in cur.fetchall()}
+            add_progress_log(job_id, f"Loaded {len(valid_policy_ids)} valid policy IDs", "success", 9)
+            
+            def escape_sql_value(val):
+                if isinstance(val, str):
+                    return "'" + val.replace("'", "''") + "'"
+                elif val is None:
+                    return 'NULL'
+                else:
+                    return str(val)
+            
+            columns = [
+                'policy_id', 'tpa', 'account', 'claim_date', 'member_id',
+                'member_name', 'relation', 'age', 'chronic', 'disease_category',
+                'provider', 'provider_type', 'claim_id', 'show_button', 'amount',
+                'risk_carrier', 'month', 'services_group', 'icd_code', 'disease',
+                'total_amount', '"order"'
+            ]
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            query_body = {
+                "query": "SELECT * FROM `beyond-438113.Utlization.Utilization_Data`",
+                "useLegacySql": False,
+                "maxResults": BATCH_SIZE
+            }
+            
+            page_token = None
+            total_records_bq = 0
+            total_inserted_records = 0
+            total_neglected_records = 0
+            neglected_policies = {}
+            batch_number = 0
+            
+            # Fetch + Insert loop
+            while True:
+                batch_number += 1
+                if page_token:
+                    query_body["pageToken"] = page_token
+                else:
+                    query_body.pop("pageToken", None)
+                
+                add_progress_log(job_id, f"Fetching batch #{batch_number} from BigQuery...", "info", 10 + batch_number)
+                response = requests.post(BQ_URL, headers=headers, json=query_body)
+                response.raise_for_status()
+                data = response.json()
+                
+                rows = data.get("rows", [])
+                if not rows:
+                    add_progress_log(job_id, "No more rows to process. Completed successfully.", "success")
+                    break
+                
+                schema = [f["name"] for f in data["schema"]["fields"]]
+                records = [dict(zip(schema, [c["v"] for c in row["f"]])) for row in rows]
+                
+                values_sql = []
+                batch_insert_count = 0
+                
+                for r in records:
+                    total_records_bq += 1
+                    raw_policy_id = r.get("Odoo_id")
+                    policy_id_str = str(raw_policy_id) if raw_policy_id is not None else None
+                    
+                    if not policy_id_str or policy_id_str not in valid_policy_ids:
+                        total_neglected_records += 1
+                        key = policy_id_str or "NULL"
+                        if key not in neglected_policies:
+                            neglected_policies[key] = {
+                                "odoo_ref": r.get("Odoo_Ref"),
+                                "count": 1,
+                            }
+                        else:
+                            neglected_policies[key]["count"] += 1
+                        continue
+                    
+                    row = [
+                        raw_policy_id,
+                        r.get("TPA", ""),
+                        r.get("ACCOUNT", ""),
+                        r.get("CLAIM_DATE", ""),
+                        r.get("MEMBER_ID", ""),
+                        r.get("MEMBER_NAME", ""),
+                        r.get("RELATION", ""),
+                        int(r.get("AGE", 0) or 0),
+                        r.get("CHRONIC", ""),
+                        r.get("Disease_category", ""),
+                        r.get("PROVIDER", ""),
+                        r.get("Provider_Type", ""),
+                        r.get("CLAIM_ID", ""),
+                        False,
+                        float(r.get("TOTAL_AMOUNT") or 0),
+                        r.get("RISK_CARRIER", ""),
+                        r.get("MONTH", ""),
+                        r.get("SERVICES_GROUP", ""),
+                        r.get("ICD_CODE", ""),
+                        r.get("DISEASE", ""),
+                        float(r.get("TOTAL_AMOUNT") or 0),
+                        "Auto"
+                    ]
+                    
+                    escaped = [escape_sql_value(v) for v in row]
+                    values_sql.append(f"({', '.join(escaped)})")
+                    batch_insert_count += 1
+                
+                if values_sql:
+                    insert_query = f"""
+                        INSERT INTO custom_policy_utilization (
+                            {', '.join(columns)}
+                        ) VALUES 
+                        {", ".join(values_sql)};
+                    """
+                    try:
+                        add_progress_log(job_id, f"Inserting {batch_insert_count} records from batch #{batch_number}...", "info")
+                        cur.execute(insert_query)
+                        conn.commit()
+                        total_inserted_records += batch_insert_count
+                        add_progress_log(job_id, f"Inserted batch #{batch_number}. Total inserted: {total_inserted_records}", "success")
+                    except Exception as e:
+                        add_progress_log(job_id, f"Error during insert batch #{batch_number}: {e}", "error")
+                        conn.rollback()
+                
+                page_token = data.get("pageToken")
+                if not page_token:
+                    add_progress_log(job_id, "Finished processing all batches.", "success")
+                    break
+            
+            # Cleanup
+            cur.close()
+            conn.close()
+            
+            total_neglected_unique_ids = len(neglected_policies)
+            
+            # Build summary
+            summary_lines = []
+            summary_lines.append("Utilization Sync Summary")
+            summary_lines.append("====================================")
+            summary_lines.append(f"Total records in BigQuery: {total_records_bq}")
+            summary_lines.append(f"Total inserted records in Odoo: {total_inserted_records}")
+            summary_lines.append(f"Total neglected records from BigQuery (policy not found in Odoo): {total_neglected_records}")
+            summary_lines.append(f"Total neglected unique Odoo_id values: {total_neglected_unique_ids}")
+            summary_lines.append("")
+            summary_lines.append("Neglected policy IDs (Odoo_id) with Odoo_Ref and neglected row count:")
+            summary_lines.append("Odoo_id | Odoo_Ref | Neglected_Rows")
+            summary_lines.append("------------------------------------")
+            for policy_id_str, info in neglected_policies.items():
+                odoo_ref = info.get("odoo_ref")
+                count = info.get("count", 0)
+                summary_lines.append(f"{policy_id_str} | {odoo_ref} | {count}")
+            
+            summary_text = "\\n".join(summary_lines)
+            add_progress_log(job_id, summary_text, "info")
+            add_progress_log(job_id, "Process completed successfully", "success")
+            
+            send_email("Utilization Update Done", summary_text)
+            update_job_status(job_id, "completed", result_summary=summary_text)
+            
+        except Exception as e:
+            error_msg = f"Error in utilization sync: {str(e)}\\n{traceback.format_exc()}"
+            add_progress_log(job_id, error_msg, "error")
+            update_job_status(job_id, "failed", error_message=error_msg)
+            send_email("Utilization Update Failed", error_msg)
+    
+    # Start background job (this function checks if already running internally)
+    job_result = start_background_job(job_type, run_utilization_sync)
+    
+    # If already running, return that message, otherwise return the job result
+    if job_result.get("status") == "already_running":
+        result = {"message": "Utilization update already started", "status": "running"}
+    else:
+        result = job_result'''
+            
+            utilization_sync_id = str(uuid.uuid4())
+            now = datetime.datetime.now()
+            cur.execute("""
+                INSERT INTO apis (id, name, path, method, python_code, description, enabled, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                utilization_sync_id, "Utilization Sync", "/api/utilization/sync", "POST",
+                utilization_sync_code,
+                "Asynchronous utilization sync from BigQuery to Odoo. Returns immediately and runs in background.",
+                True, now, now
+            ))
+            conn.commit()
+            print("Utilization Sync API added to database")
+        cur.close()
+        return_db_connection(conn)
+    except Exception as e:
+        print(f"Error checking/creating utilization sync API: {e}")
+        if conn:
+            return_db_connection(conn)
+
 
 # Default endpoints
 @app.get("/ping")

@@ -11,8 +11,9 @@
         <header>
             <h1>🚀 API Management System</h1>
             <nav>
-                <a href="/" class="active">APIs</a>
+                <a href="/" class="active" onclick="showAPIsTab()">APIs</a>
                 <a href="/logs">Logs</a>
+                <a href="#" class="async-logs-tab" onclick="showAsyncLogsTab(); return false;">Async Logs</a>
                 <button class="btn btn-success" onclick="restartServer()" style="margin-left: auto; margin-right: 10px;">🔄 Restart Server</button>
                 <a href="/logout" style="color: #e74c3c;">Logout</a>
             </nav>
@@ -157,6 +158,22 @@ result = {
                     <h2>Welcome to API Management</h2>
                     <p>Create your first API to get started!</p>
                     <button class="btn btn-primary" onclick="showCreateForm()">Create API</button>
+                </div>
+
+                <div id="asyncLogsView" class="async-logs-container" style="display: none;">
+                    <div class="async-logs-header">
+                        <h2>🔄 Asynchronous API Logs</h2>
+                        <div class="async-logs-controls">
+                            <button class="btn btn-primary" onclick="refreshAsyncLogs()">🔄 Refresh</button>
+                            <label>
+                                <input type="checkbox" id="asyncAutoRefresh" onchange="toggleAsyncAutoRefresh()"> Auto-refresh (3s)
+                            </label>
+                        </div>
+                    </div>
+                    <div id="asyncLogsList" class="async-logs-list"></div>
+                    <div id="emptyAsyncLogs" class="empty-state" style="display: none;">
+                        <p>No asynchronous jobs found.</p>
+                    </div>
                 </div>
             </div>
         </div>
