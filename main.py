@@ -806,8 +806,12 @@ def create_dynamic_route(api_def: Dict):
         
         # Return the actual result when execution completes
         if exec_result and exec_result["success"]:
+            api_result = exec_result.get("result")
+            # If result is None, provide a default message
+            if api_result is None:
+                api_result = {"message": "API executed successfully but returned no result"}
             return JSONResponse(content={
-                "result": exec_result["result"]
+                "result": api_result
             })
         elif exec_result:
             return JSONResponse(
