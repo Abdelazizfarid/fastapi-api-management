@@ -667,18 +667,26 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
         
         try:
             exec(code, context)
+        except Exception as exec_error:
+            # If execution fails, capture the error
+            error_output.write(f"Execution error: {str(exec_error)}\n")
+            error_output.write(traceback.format_exc())
+            # Don't set result here, let it be handled below
         finally:
             # Restore original print
             builtins.print = original_print
         
         # Get result if set
         result = context.get("result")
-        # If result is None, check if it was explicitly set to None or not set at all
-        if result is None and "result" not in context:
-            result = "Code executed successfully"
-        elif result is None:
-            # Result was explicitly set to None, try to get a default
-            result = {"message": "Code executed but returned no result"}
+        # Debug: Check if result was set
+        if "result" in context:
+            # Result was set in context (even if None)
+            if result is None:
+                # Result was explicitly set to None - this shouldn't happen but handle it
+                result = {"message": "Code executed but result was None", "warning": "Check code execution"}
+        else:
+            # Result was never set - code didn't execute result assignment
+            result = {"message": "Code executed but did not set result variable", "warning": "Code may be incomplete"}
         
     except Exception as e:
         error_output.write(str(e))
