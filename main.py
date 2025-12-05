@@ -679,14 +679,13 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
         # Get result if set
         result = context.get("result")
         # Debug: Check if result was set
-        if "result" in context:
-            # Result was set in context (even if None)
-            if result is None:
-                # Result was explicitly set to None - this shouldn't happen but handle it
-                result = {"message": "Code executed but result was None", "warning": "Check code execution"}
-        else:
+        if "result" not in context:
             # Result was never set - code didn't execute result assignment
             result = {"message": "Code executed but did not set result variable", "warning": "Code may be incomplete"}
+        elif result is None:
+            # Result was explicitly set to None - check stdout for clues
+            stdout_text_preview = output.getvalue()[:500] if hasattr(output, 'getvalue') else ""
+            result = {"message": "Code executed but result was None", "warning": "Check code execution", "stdout_preview": stdout_text_preview}
         
     except Exception as e:
         error_output.write(str(e))
