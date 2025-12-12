@@ -1997,25 +1997,39 @@ else:
             
             # Call Graph API to get media info
             graph_url = f"https://graph.facebook.com/v18.0/{media_id}"
+            print(f"DEBUG: Calling Graph API: {graph_url}")
             graph_response = requests.get(graph_url, headers=headers, timeout=300)
+            
+            print(f"DEBUG: Graph API response status: {graph_response.status_code}")
+            print(f"DEBUG: Graph API response headers: {dict(graph_response.headers)}")
             
             if graph_response.status_code == 200:
                 try:
                     graph_data = graph_response.json()
+                    print(f"DEBUG: Graph API response data keys: {list(graph_data.keys())}")
                     if 'url' in graph_data:
                         actual_media_url = graph_data['url']
                         print(f"DEBUG: Got media URL from Graph API: {actual_media_url[:100]}...")
                         print(f"DEBUG: Downloading from Graph API URL...")
                         response_download = requests.get(actual_media_url, headers=headers, timeout=300)
                         print(f"DEBUG: Download status: {response_download.status_code}")
+                        print(f"DEBUG: Download content-type: {response_download.headers.get('Content-Type', 'unknown')}")
                     else:
-                        print(f"DEBUG: Graph API response missing 'url' field")
+                        print(f"DEBUG: Graph API response missing 'url' field. Response: {graph_data}")
                         response_download = graph_response
                 except Exception as e:
                     print(f"DEBUG: Error parsing Graph API response: {e}")
+                    print(f"DEBUG: Graph API response text: {graph_response.text[:500]}")
                     response_download = graph_response
             else:
                 print(f"DEBUG: Graph API failed with status {graph_response.status_code}")
+                print(f"DEBUG: Graph API response text: {graph_response.text[:500]}")
+                # Check if it's a JSON error response
+                try:
+                    error_data = graph_response.json()
+                    print(f"DEBUG: Graph API error details: {error_data}")
+                except:
+                    pass
                 response_download = graph_response
         else:
             # Fallback: Try direct URL if no media ID found
