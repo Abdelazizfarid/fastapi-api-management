@@ -1821,6 +1821,148 @@ result = {k: v for k, v in result.items() if v is not None}'''
         print(f"Error checking/creating utilization sync API: {e}")
         if conn:
             return_db_connection(conn)
+    
+    # Add audio transcription API to database if not exists
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM apis WHERE path = %s AND method = %s", ("/api/audio/transcribe", "POST"))
+        if not cur.fetchone():
+            transcription_code = '''import sys
+import os
+import tempfile
+
+# -----------------------------
+# FIX protobuf conflict
+# -----------------------------
+user_site_packages = os.path.expanduser("~/.local/lib/python3.10/site-packages")
+modules_to_remove = [k for k in list(sys.modules.keys())
+                     if k.startswith('google.protobuf') or k.startswith('google.rpc')]
+for mod in modules_to_remove:
+    del sys.modules[mod]
+
+new_path = []
+dist_packages_paths = []
+for p in sys.path:
+    if '/usr/lib/python3/dist-packages' in p:
+        dist_packages_paths.append(p)
+    else:
+        new_path.append(p)
+
+if user_site_packages in new_path:
+    new_path.remove(user_site_packages)
+new_path.insert(0, user_site_packages)
+new_path.extend(dist_packages_paths)
+sys.path = new_path
+
+# -----------------------------
+# IMPORT GEMINI SDK
+# -----------------------------
+import google.generativeai as genai
+
+# -----------------------------
+# CONFIG
+# -----------------------------
+GEMINI_API_KEY = "AIzaSyDmr5DDqIqzsoYGFtQhFIc8Scr08qDnYQI"
+MASTER_PROMPT = """
+Transcribe the audio with maximum accuracy.
+- If audio is Arabic: write perfect Modern Standard Arabic unless dialect is clear.
+- Preserve meaning faithfully.
+- Do NOT add explanations or notes.
+- Output ONLY the transcription.
+"""
+
+# -----------------------------
+# SETUP
+# -----------------------------
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-3-pro-preview")  # Best Arabic model
+
+# -----------------------------
+# GET AUDIO URL FROM REQUEST
+# -----------------------------
+body = request_data.get("body", {})
+audio_url = body.get("audio_url") or body.get("url")
+
+if not audio_url:
+    result = {"error": "Missing audio_url parameter. Please provide audio_url in request body."}
+else:
+    try:
+        # Download audio file
+        import tempfile
+        response_download = requests.get(audio_url, timeout=300)
+        response_download.raise_for_status()
+        
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.ogg')
+        temp_file.write(response_download.content)
+        temp_file.close()
+        audio_path = temp_file.name
+        
+        try:
+            # Upload audio to Gemini
+            audio_file = genai.upload_file(audio_path)
+            
+            # Transcribe
+            response = model.generate_content(
+                [MASTER_PROMPT, audio_file],
+                request_options={"timeout": 600}
+            )
+            
+            transcription = response.text.strip()
+            result = {
+                "transcription": transcription,
+                "audio_url": audio_url,
+                "status": "success"
+            }
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(audio_path)
+            except:
+                pass
+    except requests.exceptions.RequestException as e:
+        result = {"error": f"Failed to download audio file: {str(e)}", "status": "error"}
+    except Exception as e:
+        result = {"error": f"Transcription failed: {str(e)}", "status": "error"}'''
+            
+            transcription_id = str(uuid.uuid4())
+            now = datetime.datetime.now()
+            api_def = {
+                "id": transcription_id,
+                "name": "Audio Transcription",
+                "path": "/api/audio/transcribe",
+                "method": "POST",
+                "python_code": transcription_code,
+                "description": "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages.",
+                "enabled": True,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat()
+            }
+            cur.execute("""
+                INSERT INTO apis (id, name, path, method, python_code, description, enabled, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                transcription_id, "Audio Transcription", "/api/audio/transcribe", "POST",
+                transcription_code,
+                "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages.",
+                True, now, now
+            ))
+            conn.commit()
+            print("Audio Transcription API added to database")
+            # Register the route immediately after creating it
+            try:
+                create_dynamic_route(api_def)
+                print("Audio Transcription API route registered")
+            except Exception as e:
+                print(f"Error registering Audio Transcription API route: {e}")
+        cur.close()
+        return_db_connection(conn)
+    except Exception as e:
+        print(f"Error checking/creating audio transcription API: {e}")
+        if conn:
+            return_db_connection(conn)
 
 
 # Default endpoints
