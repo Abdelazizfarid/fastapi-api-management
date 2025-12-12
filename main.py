@@ -1988,8 +1988,16 @@ else:
         
         print(f"DEBUG: Request headers keys: {list(headers.keys())}")
         print(f"DEBUG: Authorization header present: {'Authorization' in headers}")
+        print(f"DEBUG: Using audio_url: {audio_url}")
+        print(f"DEBUG: Bearer token first 30 chars: {bearer_token[:30] if bearer_token else 'None'}...")
+        print(f"DEBUG: Bearer token last 30 chars: ...{bearer_token[-30:] if bearer_token and len(bearer_token) > 30 else bearer_token}")
+        print(f"DEBUG: Full Authorization header: {headers.get('Authorization', 'NOT SET')[:50]}...")
         
         response_download = requests.get(audio_url, headers=headers, timeout=300)
+        
+        print(f"DEBUG: Response status: {response_download.status_code}")
+        print(f"DEBUG: Response headers: {dict(response_download.headers)}")
+        print(f"DEBUG: Response content type: {response_download.headers.get('Content-Type', 'unknown')}")
         
         # Check if response is JSON error (WhatsApp API returns JSON errors)
         content_type = response_download.headers.get('Content-Type', '').lower()
