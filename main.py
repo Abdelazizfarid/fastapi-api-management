@@ -1881,34 +1881,9 @@ import tempfile
 import gc
 import importlib
 
-# More aggressive cleanup - remove ONLY protobuf/rpc modules, NOT generativeai
-# Removing generativeai breaks the package structure and causes ImportError
-modules_to_remove = []
-for module_name in list(sys.modules.keys()):
-    if any(module_name.startswith(prefix) for prefix in [
-        'google.protobuf',
-        'google.rpc',
-        'google._upb',
-        'google._message'
-    ]) and not module_name.startswith('google.generativeai'):
-        modules_to_remove.append(module_name)
-
-# Remove modules in reverse order (dependencies first)
-for mod in sorted(modules_to_remove, reverse=True):
-    if mod in sys.modules:
-        try:
-            # Clear any references
-            module_obj = sys.modules[mod]
-            if hasattr(module_obj, '__dict__'):
-                module_obj.__dict__.clear()
-            del sys.modules[mod]
-        except:
-            pass
-
-# Force garbage collection
-gc.collect()
-
-# Reorder sys.path to prioritize venv packages over system packages
+# Less aggressive cleanup - only remove if there are actual conflicts
+# Don't remove protobuf modules that generativeai needs (like Empty)
+# Just ensure venv packages are prioritized
 venv_path = None
 for p in sys.path:
     if 'venv' in p and 'site-packages' in p:
@@ -1922,7 +1897,7 @@ if venv_path:
 # Remove system dist-packages from path to avoid conflicts
 sys.path = [p for p in sys.path if '/usr/lib/python3/dist-packages' not in p]
 
-# Invalidate import caches
+# Invalidate import caches (but don't remove modules - let them reload naturally)
 importlib.invalidate_caches()
 
 # -----------------------------
