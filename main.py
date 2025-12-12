@@ -634,46 +634,31 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
         sys.stdout = output
         sys.stderr = error_output
         
-        # ===== Clean up protobuf modules in thread context to avoid conflicts =====
-        # This is critical when code executes in threads and protobuf modules
-        # might already be loaded in the main process
-        # IMPORTANT: Only remove protobuf/rpc modules, NOT google.generativeai modules
-        # Removing generativeai breaks the package structure
+        # ===== Minimal protobuf cleanup - only reorder paths, don't remove modules =====
+        # Removing protobuf modules causes "Empty" attribute errors intermittently
+        # Instead, just ensure venv packages are prioritized
         import importlib
-        import gc
         
-        # Only remove protobuf and rpc modules, NOT generativeai
-        modules_to_remove = []
-        for module_name in list(sys.modules.keys()):
-            if any(module_name.startswith(prefix) for prefix in [
-                'google.protobuf',
-                'google.rpc',
-                'google._upb',
-                'google._message'
-            ]) and not module_name.startswith('google.generativeai'):
-                modules_to_remove.append(module_name)
+        # Reorder sys.path to prioritize venv packages (less aggressive than removing modules)
+        venv_path = None
+        for p in sys.path:
+            if 'venv' in p and 'site-packages' in p:
+                venv_path = p
+                break
         
-        # Remove modules in reverse order (dependencies first)
-        for mod in sorted(modules_to_remove, reverse=True):
-            if mod in sys.modules:
-                try:
-                    # Clear any references
-                    module_obj = sys.modules[mod]
-                    if hasattr(module_obj, '__dict__'):
-                        module_obj.__dict__.clear()
-                    del sys.modules[mod]
-                except:
-                    pass
+        if venv_path and venv_path != sys.path[0]:
+            # Move venv site-packages to front if not already there
+            sys.path = [venv_path] + [p for p in sys.path if p != venv_path]
         
-        # Force garbage collection to clean up references
-        gc.collect()
+        # Remove system dist-packages from path to avoid conflicts
+        sys.path = [p for p in sys.path if '/usr/lib/python3/dist-packages' not in p]
         
-        # Invalidate import caches to ensure fresh imports
+        # Invalidate import caches (but don't remove modules)
         try:
             importlib.invalidate_caches()
         except:
             pass
-        # ===== End protobuf cleanup =====
+        # ===== End minimal cleanup =====
         
         # Create execution context with helper functions
         context = {
