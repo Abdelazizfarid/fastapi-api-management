@@ -1999,22 +1999,48 @@ else:
         print(f"DEBUG: Response headers: {dict(response_download.headers)}")
         print(f"DEBUG: Response content type: {response_download.headers.get('Content-Type', 'unknown')}")
         
-        # If we get 404 with "Failed in checking if the request is signed", try alternative approach
-        # WhatsApp Business API might need the token as a query parameter or different format
+        # If we get 404 with "Failed in checking if the request is signed", try alternative approaches
         if response_download.status_code == 404 and 'Failed in checking if the request is signed' in response_download.text:
-            print(f"DEBUG: Got signed request error, trying alternative with access_token query param")
-            # Try with access_token as query parameter
+            print(f"DEBUG: Got signed request error, trying alternative methods")
+            
+            # Method 1: Try with access_token as query parameter
             import urllib.parse
             parsed_url = urllib.parse.urlparse(audio_url)
             query_params = urllib.parse.parse_qs(parsed_url.query)
-            query_params['access_token'] = [bearer_token.strip() if bearer_token else default_token]
+            token_to_use = bearer_token.strip() if bearer_token and bearer_token.strip() else default_token
+            query_params['access_token'] = [token_to_use]
             new_query = urllib.parse.urlencode(query_params, doseq=True)
             alternative_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{new_query}"
             
-            # Try again with token in URL
+            print(f"DEBUG: Trying Method 1: access_token as query param")
             headers_alt = {"User-Agent": "Mozilla/5.0"}
             response_download = requests.get(alternative_url, headers=headers_alt, timeout=300)
-            print(f"DEBUG: Alternative request status: {response_download.status_code}")
+            print(f"DEBUG: Method 1 status: {response_download.status_code}")
+            
+            # If still failing, try Method 2: Extract media ID and use Graph API
+            if response_download.status_code == 404:
+                print(f"DEBUG: Method 1 failed, trying Method 2: Graph API")
+                media_id = query_params.get('mid', [None])[0]
+                if media_id:
+                    graph_url = f"https://graph.facebook.com/v18.0/{media_id}"
+                    graph_headers = {
+                        "Authorization": f"Bearer {token_to_use}",
+                        "User-Agent": "Mozilla/5.0"
+                    }
+                    print(f"DEBUG: Trying Graph API URL: {graph_url}")
+                    response_download = requests.get(graph_url, headers=graph_headers, timeout=300)
+                    print(f"DEBUG: Graph API status: {response_download.status_code}")
+                    
+                    # If Graph API returns JSON with URL, use that URL
+                    if response_download.status_code == 200:
+                        try:
+                            graph_data = response_download.json()
+                            if 'url' in graph_data:
+                                print(f"DEBUG: Got media URL from Graph API, downloading...")
+                                response_download = requests.get(graph_data['url'], headers={"Authorization": f"Bearer {token_to_use}"}, timeout=300)
+                                print(f"DEBUG: Media download status: {response_download.status_code}")
+                        except:
+                            pass
         
         # Check if response is JSON error (WhatsApp API returns JSON errors)
         content_type = response_download.headers.get('Content-Type', '').lower()
