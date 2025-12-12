@@ -1931,6 +1931,14 @@ importlib.invalidate_caches()
 # -----------------------------
 # IMPORT GEMINI SDK (after protobuf fix)
 # -----------------------------
+# Force fresh import of protobuf first to ensure clean state
+try:
+    import google.protobuf
+    importlib.reload(google.protobuf)
+except:
+    pass
+
+# Now import generativeai
 import google.generativeai as genai
 
 # -----------------------------
