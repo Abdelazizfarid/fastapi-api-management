@@ -1898,36 +1898,57 @@ else:
             headers["Authorization"] = f"Bearer {bearer_token}"
         
         response_download = requests.get(audio_url, headers=headers, timeout=300)
-        response_download.raise_for_status()
         
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.ogg')
-        temp_file.write(response_download.content)
-        temp_file.close()
-        audio_path = temp_file.name
-        
-        try:
-            # Upload audio to Gemini
-            audio_file = genai.upload_file(audio_path)
-            
-            # Transcribe
-            response = model.generate_content(
-                [MASTER_PROMPT, audio_file],
-                request_options={"timeout": 600}
-            )
-            
-            transcription = response.text.strip()
-            result = {
-                "transcription": transcription,
-                "audio_url": audio_url,
-                "status": "success"
-            }
-        finally:
-            # Clean up temporary file
+        # Check if response is JSON error (WhatsApp API returns JSON errors)
+        content_type = response_download.headers.get('Content-Type', '').lower()
+        if 'application/json' in content_type or response_download.text.strip().startswith('{'):
             try:
-                os.unlink(audio_path)
+                error_data = response_download.json()
+                error_msg = error_data.get('detail') or error_data.get('title') or error_data.get('message', 'Unknown error')
+                result = {
+                    "error": f"Media download failed: {error_msg}",
+                    "status": "error",
+                    "http_status": response_download.status_code,
+                    "error_details": error_data
+                }
             except:
-                pass
+                result = {
+                    "error": f"Failed to download audio file: HTTP {response_download.status_code} - {response_download.text[:200]}",
+                    "status": "error",
+                    "http_status": response_download.status_code
+                }
+        else:
+            # Check HTTP status
+            response_download.raise_for_status()
+            
+            # Create temporary file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.ogg')
+            temp_file.write(response_download.content)
+            temp_file.close()
+            audio_path = temp_file.name
+        
+            try:
+                # Upload audio to Gemini
+                audio_file = genai.upload_file(audio_path)
+                
+                # Transcribe
+                response = model.generate_content(
+                    [MASTER_PROMPT, audio_file],
+                    request_options={"timeout": 600}
+                )
+                
+                transcription = response.text.strip()
+                result = {
+                    "transcription": transcription,
+                    "audio_url": audio_url,
+                    "status": "success"
+                }
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(audio_path)
+                except:
+                    pass
     except requests.exceptions.RequestException as e:
         result = {"error": f"Failed to download audio file: {str(e)}", "status": "error"}
     except Exception as e:
@@ -1973,7 +1994,7 @@ else:
                 "path": "/api/audio/transcribe",
                 "method": "POST",
                 "python_code": transcription_code,
-                "description": "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages. Supports Bearer token authentication.",
+                "description": "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages. Supports Bearer token authentication. Note: WhatsApp Business API media URLs may require signed requests - ensure your access token has proper permissions.",
                 "enabled": True,
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat()
