@@ -1969,78 +1969,61 @@ if not audio_url:
     result = {"error": "Missing audio_url parameter. Please provide audio_url in request body.", "debug": {"received_body": str(body)}}
 else:
     try:
-        # Download audio file with Bearer token authentication
+        # Download audio file using WhatsApp Graph API method (proven to work)
         import tempfile
+        import urllib.parse
+        import re
+        
+        # Get bearer token
+        token_to_use = bearer_token.strip() if bearer_token and isinstance(bearer_token, str) and bearer_token.strip() else "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"
+        
         headers = {
+            "Authorization": f"Bearer {token_to_use}",
             "User-Agent": "Mozilla/5.0"
         }
         
-        # Always use bearer_token (either from request or default)
-        # Ensure token is not empty and is a string
-        if bearer_token and isinstance(bearer_token, str) and bearer_token.strip():
-            headers["Authorization"] = f"Bearer {bearer_token.strip()}"
-            print(f"DEBUG: Using provided bearer_token")
-        else:
-            # Use default token
-            default_token = "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"
-            headers["Authorization"] = f"Bearer {default_token}"
-            print(f"DEBUG: Using default bearer_token")
-        
-        print(f"DEBUG: Request headers keys: {list(headers.keys())}")
-        print(f"DEBUG: Authorization header present: {'Authorization' in headers}")
         print(f"DEBUG: Using audio_url: {audio_url}")
-        print(f"DEBUG: Bearer token first 30 chars: {bearer_token[:30] if bearer_token else 'None'}...")
-        print(f"DEBUG: Bearer token last 30 chars: ...{bearer_token[-30:] if bearer_token and len(bearer_token) > 30 else bearer_token}")
-        print(f"DEBUG: Full Authorization header: {headers.get('Authorization', 'NOT SET')[:50]}...")
+        print(f"DEBUG: Bearer token first 30 chars: {token_to_use[:30]}...")
         
-        response_download = requests.get(audio_url, headers=headers, timeout=300)
+        # Extract media ID from URL (mid parameter)
+        parsed_url = urllib.parse.urlparse(audio_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        media_id = query_params.get('mid', [None])[0]
         
-        print(f"DEBUG: Response status: {response_download.status_code}")
-        print(f"DEBUG: Response headers: {dict(response_download.headers)}")
+        # Method: Use Graph API to get the actual media URL
+        if media_id:
+            print(f"DEBUG: Extracted media_id: {media_id}")
+            print(f"DEBUG: Calling Graph API to get media URL...")
+            
+            # Call Graph API to get media info
+            graph_url = f"https://graph.facebook.com/v18.0/{media_id}"
+            graph_response = requests.get(graph_url, headers=headers, timeout=300)
+            
+            if graph_response.status_code == 200:
+                try:
+                    graph_data = graph_response.json()
+                    if 'url' in graph_data:
+                        actual_media_url = graph_data['url']
+                        print(f"DEBUG: Got media URL from Graph API: {actual_media_url[:100]}...")
+                        print(f"DEBUG: Downloading from Graph API URL...")
+                        response_download = requests.get(actual_media_url, headers=headers, timeout=300)
+                        print(f"DEBUG: Download status: {response_download.status_code}")
+                    else:
+                        print(f"DEBUG: Graph API response missing 'url' field")
+                        response_download = graph_response
+                except Exception as e:
+                    print(f"DEBUG: Error parsing Graph API response: {e}")
+                    response_download = graph_response
+            else:
+                print(f"DEBUG: Graph API failed with status {graph_response.status_code}")
+                response_download = graph_response
+        else:
+            # Fallback: Try direct URL if no media ID found
+            print(f"DEBUG: No media_id found, trying direct URL...")
+            response_download = requests.get(audio_url, headers=headers, timeout=300)
+        
+        print(f"DEBUG: Final response status: {response_download.status_code}")
         print(f"DEBUG: Response content type: {response_download.headers.get('Content-Type', 'unknown')}")
-        
-        # If we get 404 with "Failed in checking if the request is signed", try alternative approaches
-        if response_download.status_code == 404 and 'Failed in checking if the request is signed' in response_download.text:
-            print(f"DEBUG: Got signed request error, trying alternative methods")
-            
-            # Method 1: Try with access_token as query parameter
-            import urllib.parse
-            parsed_url = urllib.parse.urlparse(audio_url)
-            query_params = urllib.parse.parse_qs(parsed_url.query)
-            token_to_use = bearer_token.strip() if bearer_token and bearer_token.strip() else default_token
-            query_params['access_token'] = [token_to_use]
-            new_query = urllib.parse.urlencode(query_params, doseq=True)
-            alternative_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{new_query}"
-            
-            print(f"DEBUG: Trying Method 1: access_token as query param")
-            headers_alt = {"User-Agent": "Mozilla/5.0"}
-            response_download = requests.get(alternative_url, headers=headers_alt, timeout=300)
-            print(f"DEBUG: Method 1 status: {response_download.status_code}")
-            
-            # If still failing, try Method 2: Extract media ID and use Graph API
-            if response_download.status_code == 404:
-                print(f"DEBUG: Method 1 failed, trying Method 2: Graph API")
-                media_id = query_params.get('mid', [None])[0]
-                if media_id:
-                    graph_url = f"https://graph.facebook.com/v18.0/{media_id}"
-                    graph_headers = {
-                        "Authorization": f"Bearer {token_to_use}",
-                        "User-Agent": "Mozilla/5.0"
-                    }
-                    print(f"DEBUG: Trying Graph API URL: {graph_url}")
-                    response_download = requests.get(graph_url, headers=graph_headers, timeout=300)
-                    print(f"DEBUG: Graph API status: {response_download.status_code}")
-                    
-                    # If Graph API returns JSON with URL, use that URL
-                    if response_download.status_code == 200:
-                        try:
-                            graph_data = response_download.json()
-                            if 'url' in graph_data:
-                                print(f"DEBUG: Got media URL from Graph API, downloading...")
-                                response_download = requests.get(graph_data['url'], headers={"Authorization": f"Bearer {token_to_use}"}, timeout=300)
-                                print(f"DEBUG: Media download status: {response_download.status_code}")
-                        except:
-                            pass
         
         # Check if response is JSON error (WhatsApp API returns JSON errors)
         content_type = response_download.headers.get('Content-Type', '').lower()
