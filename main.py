@@ -2001,13 +2001,29 @@ else:
                     "error": f"Media download failed: {error_msg}",
                     "status": "error",
                     "http_status": response_download.status_code,
-                    "error_details": error_data
+                    "error_details": error_data,
+                    "debug": {
+                        "received_body": body,
+                        "audio_url": audio_url,
+                        "bearer_token_provided": bool(bearer_token and bearer_token != "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"),
+                        "bearer_token_length": len(bearer_token) if bearer_token else 0,
+                        "authorization_header_set": bool(headers.get("Authorization")),
+                        "request_headers": {k: v[:50] + "..." if len(str(v)) > 50 else v for k, v in headers.items()}
+                    }
                 }
             except:
                 result = {
                     "error": f"Failed to download audio file: HTTP {response_download.status_code} - {response_download.text[:200]}",
                     "status": "error",
-                    "http_status": response_download.status_code
+                    "http_status": response_download.status_code,
+                    "debug": {
+                        "received_body": body,
+                        "audio_url": audio_url,
+                        "bearer_token_provided": bool(bearer_token and bearer_token != "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"),
+                        "bearer_token_length": len(bearer_token) if bearer_token else 0,
+                        "authorization_header_set": bool(headers.get("Authorization")),
+                        "request_headers": {k: v[:50] + "..." if len(str(v)) > 50 else v for k, v in headers.items()}
+                    }
                 }
         else:
             # Check HTTP status
