@@ -1998,10 +1998,13 @@ else:
             # Call Graph API to get media info
             graph_url = f"https://graph.facebook.com/v18.0/{media_id}"
             print(f"DEBUG: Calling Graph API: {graph_url}")
+            print(f"DEBUG: Using token: {token_to_use[:30]}...")
+            
             graph_response = requests.get(graph_url, headers=headers, timeout=300)
             
             print(f"DEBUG: Graph API response status: {graph_response.status_code}")
             print(f"DEBUG: Graph API response headers: {dict(graph_response.headers)}")
+            print(f"DEBUG: Graph API response text (first 500 chars): {graph_response.text[:500]}")
             
             if graph_response.status_code == 200:
                 try:
