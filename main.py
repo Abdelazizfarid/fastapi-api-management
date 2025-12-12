@@ -1999,6 +1999,23 @@ else:
         print(f"DEBUG: Response headers: {dict(response_download.headers)}")
         print(f"DEBUG: Response content type: {response_download.headers.get('Content-Type', 'unknown')}")
         
+        # If we get 404 with "Failed in checking if the request is signed", try alternative approach
+        # WhatsApp Business API might need the token as a query parameter or different format
+        if response_download.status_code == 404 and 'Failed in checking if the request is signed' in response_download.text:
+            print(f"DEBUG: Got signed request error, trying alternative with access_token query param")
+            # Try with access_token as query parameter
+            import urllib.parse
+            parsed_url = urllib.parse.urlparse(audio_url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            query_params['access_token'] = [bearer_token.strip() if bearer_token else default_token]
+            new_query = urllib.parse.urlencode(query_params, doseq=True)
+            alternative_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{new_query}"
+            
+            # Try again with token in URL
+            headers_alt = {"User-Agent": "Mozilla/5.0"}
+            response_download = requests.get(alternative_url, headers=headers_alt, timeout=300)
+            print(f"DEBUG: Alternative request status: {response_download.status_code}")
+        
         # Check if response is JSON error (WhatsApp API returns JSON errors)
         content_type = response_download.headers.get('Content-Type', '').lower()
         if 'application/json' in content_type or response_download.text.strip().startswith('{'):
