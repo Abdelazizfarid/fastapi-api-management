@@ -1822,14 +1822,15 @@ result = {k: v for k, v in result.items() if v is not None}'''
         if conn:
             return_db_connection(conn)
     
-    # Add audio transcription API to database if not exists
+    # Add/Update audio transcription API in database
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM apis WHERE path = %s AND method = %s", ("/api/audio/transcribe", "POST"))
-        if not cur.fetchone():
-            transcription_code = '''import sys
+        existing_api = cur.fetchone()
+        
+        transcription_code = '''import sys
 import os
 import tempfile
 
@@ -1884,14 +1885,19 @@ model = genai.GenerativeModel("gemini-3-pro-preview")  # Best Arabic model
 # -----------------------------
 body = request_data.get("body", {})
 audio_url = body.get("audio_url") or body.get("url")
+bearer_token = body.get("bearer_token") or body.get("token") or "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"
 
 if not audio_url:
     result = {"error": "Missing audio_url parameter. Please provide audio_url in request body."}
 else:
     try:
-        # Download audio file
+        # Download audio file with Bearer token authentication
         import tempfile
-        response_download = requests.get(audio_url, timeout=300)
+        headers = {}
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+        
+        response_download = requests.get(audio_url, headers=headers, timeout=300)
         response_download.raise_for_status()
         
         # Create temporary file
@@ -1927,15 +1933,47 @@ else:
     except Exception as e:
         result = {"error": f"Transcription failed: {str(e)}", "status": "error"}'''
             
+        now = datetime.datetime.now()
+        
+        if existing_api:
+            # Update existing API
+            api_id = existing_api[0]
+            cur.execute("""
+                UPDATE apis 
+                SET python_code = %s, description = %s, updated_at = %s
+                WHERE id = %s
+            """, (
+                transcription_code,
+                "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages. Supports Bearer token authentication.",
+                now,
+                api_id
+            ))
+            conn.commit()
+            print("Audio Transcription API updated in database")
+            
+            # Get updated API definition
+            cur.close()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT * FROM apis WHERE id = %s", (api_id,))
+            api_row = cur.fetchone()
+            if api_row:
+                api_def = dict(api_row)
+                # Register the route immediately after updating it
+                try:
+                    create_dynamic_route(api_def)
+                    print("Audio Transcription API route updated")
+                except Exception as e:
+                    print(f"Error updating Audio Transcription API route: {e}")
+        else:
+            # Create new API
             transcription_id = str(uuid.uuid4())
-            now = datetime.datetime.now()
             api_def = {
                 "id": transcription_id,
                 "name": "Audio Transcription",
                 "path": "/api/audio/transcribe",
                 "method": "POST",
                 "python_code": transcription_code,
-                "description": "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages.",
+                "description": "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages. Supports Bearer token authentication.",
                 "enabled": True,
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat()
@@ -1946,7 +1984,7 @@ else:
             """, (
                 transcription_id, "Audio Transcription", "/api/audio/transcribe", "POST",
                 transcription_code,
-                "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages.",
+                "Transcribe audio files from URLs using Google Gemini API. Supports Arabic and other languages. Supports Bearer token authentication.",
                 True, now, now
             ))
             conn.commit()
