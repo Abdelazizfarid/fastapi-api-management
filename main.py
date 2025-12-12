@@ -2011,9 +2011,21 @@ else:
                         actual_media_url = graph_data['url']
                         print(f"DEBUG: Got media URL from Graph API: {actual_media_url[:100]}...")
                         print(f"DEBUG: Downloading from Graph API URL...")
-                        response_download = requests.get(actual_media_url, headers=headers, timeout=300)
+                        
+                        # Try downloading with Bearer token
+                        download_headers = {
+                            "Authorization": f"Bearer {token_to_use}",
+                            "User-Agent": "Mozilla/5.0"
+                        }
+                        response_download = requests.get(actual_media_url, headers=download_headers, timeout=300)
                         print(f"DEBUG: Download status: {response_download.status_code}")
                         print(f"DEBUG: Download content-type: {response_download.headers.get('Content-Type', 'unknown')}")
+                        
+                        # If 401, try without Authorization header (some URLs don't need it)
+                        if response_download.status_code == 401:
+                            print(f"DEBUG: Got 401, trying without Authorization header...")
+                            response_download = requests.get(actual_media_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=300)
+                            print(f"DEBUG: Download status without auth: {response_download.status_code}")
                     else:
                         print(f"DEBUG: Graph API response missing 'url' field. Response: {graph_data}")
                         response_download = graph_response
