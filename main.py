@@ -637,21 +637,20 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
         # ===== Clean up protobuf modules in thread context to avoid conflicts =====
         # This is critical when code executes in threads and protobuf modules
         # might already be loaded in the main process
+        # IMPORTANT: Only remove protobuf/rpc modules, NOT google.generativeai modules
+        # Removing generativeai breaks the package structure
         import importlib
         import gc
         
-        # More aggressive cleanup - remove ALL google-related modules
+        # Only remove protobuf and rpc modules, NOT generativeai
         modules_to_remove = []
         for module_name in list(sys.modules.keys()):
             if any(module_name.startswith(prefix) for prefix in [
                 'google.protobuf',
-                'google.rpc', 
-                'google.generativeai',
-                'google.api',
-                'google.type',
+                'google.rpc',
                 'google._upb',
                 'google._message'
-            ]):
+            ]) and not module_name.startswith('google.generativeai'):
                 modules_to_remove.append(module_name)
         
         # Remove modules in reverse order (dependencies first)
@@ -1882,18 +1881,16 @@ import tempfile
 import gc
 import importlib
 
-# More aggressive cleanup - remove ALL google-related modules
+# More aggressive cleanup - remove ONLY protobuf/rpc modules, NOT generativeai
+# Removing generativeai breaks the package structure and causes ImportError
 modules_to_remove = []
 for module_name in list(sys.modules.keys()):
     if any(module_name.startswith(prefix) for prefix in [
         'google.protobuf',
-        'google.rpc', 
-        'google.generativeai',
-        'google.api',
-        'google.type',
+        'google.rpc',
         'google._upb',
         'google._message'
-    ]):
+    ]) and not module_name.startswith('google.generativeai'):
         modules_to_remove.append(module_name)
 
 # Remove modules in reverse order (dependencies first)
@@ -1931,14 +1928,8 @@ importlib.invalidate_caches()
 # -----------------------------
 # IMPORT GEMINI SDK (after protobuf fix)
 # -----------------------------
-# Force fresh import of protobuf first to ensure clean state
-try:
-    import google.protobuf
-    importlib.reload(google.protobuf)
-except:
-    pass
-
-# Now import generativeai
+# Import generativeai - it will handle protobuf imports internally
+# Don't pre-import protobuf as it may cause conflicts
 import google.generativeai as genai
 
 # -----------------------------
