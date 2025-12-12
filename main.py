@@ -1954,18 +1954,40 @@ model = genai.GenerativeModel("gemini-3-pro-preview")  # Best Arabic model
 # GET AUDIO URL FROM REQUEST
 # -----------------------------
 body = request_data.get("body", {})
+# Debug: print what we received (will be in logs)
+print(f"DEBUG: Received body: {body}")
+print(f"DEBUG: Body type: {type(body)}")
+print(f"DEBUG: Body keys: {list(body.keys()) if isinstance(body, dict) else 'Not a dict'}")
+
 audio_url = body.get("audio_url") or body.get("url")
-bearer_token = body.get("bearer_token") or body.get("token") or "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"
+bearer_token = body.get("bearer_token") or body.get("token") or body.get("bearerToken") or "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"
+
+print(f"DEBUG: audio_url = {audio_url}")
+print(f"DEBUG: bearer_token = {bearer_token[:20] if bearer_token else None}...")
 
 if not audio_url:
-    result = {"error": "Missing audio_url parameter. Please provide audio_url in request body."}
+    result = {"error": "Missing audio_url parameter. Please provide audio_url in request body.", "debug": {"received_body": str(body)}}
 else:
     try:
         # Download audio file with Bearer token authentication
         import tempfile
-        headers = {}
-        if bearer_token:
-            headers["Authorization"] = f"Bearer {bearer_token}"
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+        
+        # Always use bearer_token (either from request or default)
+        # Ensure token is not empty and is a string
+        if bearer_token and isinstance(bearer_token, str) and bearer_token.strip():
+            headers["Authorization"] = f"Bearer {bearer_token.strip()}"
+            print(f"DEBUG: Using provided bearer_token")
+        else:
+            # Use default token
+            default_token = "EAASCfixWPU0BPHxtlgq0KfyOuB8gFSy5Um15IBcOwBhad25ZB29Bq05nIEiBhkWtFNHC4rUs7fJPQ2GNUwiDZAfrKOy1dOyzH6NPJxAHSBkNIYJIL9Agbvbgiyxddyz4iBbJcZAXZA0mPUHN8leQbZAetn1SxYraUY2YFu84r8HZBG182ZBkxttwoS8u40Lr5ejMAZDZD"
+            headers["Authorization"] = f"Bearer {default_token}"
+            print(f"DEBUG: Using default bearer_token")
+        
+        print(f"DEBUG: Request headers keys: {list(headers.keys())}")
+        print(f"DEBUG: Authorization header present: {'Authorization' in headers}")
         
         response_download = requests.get(audio_url, headers=headers, timeout=300)
         
