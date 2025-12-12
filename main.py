@@ -634,6 +634,35 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
         sys.stdout = output
         sys.stderr = error_output
         
+        # ===== Clean up protobuf modules in thread context to avoid conflicts =====
+        # This is critical when code executes in threads and protobuf modules
+        # might already be loaded in the main process
+        import importlib
+        modules_to_remove = []
+        for module_name in list(sys.modules.keys()):
+            if any(module_name.startswith(prefix) for prefix in [
+                'google.protobuf',
+                'google.rpc', 
+                'google.generativeai',
+                'google.api',
+                'google.type'
+            ]):
+                modules_to_remove.append(module_name)
+        
+        for mod in modules_to_remove:
+            if mod in sys.modules:
+                try:
+                    del sys.modules[mod]
+                except:
+                    pass
+        
+        # Invalidate import caches to ensure fresh imports
+        try:
+            importlib.invalidate_caches()
+        except:
+            pass
+        # ===== End protobuf cleanup =====
+        
         # Create execution context with helper functions
         context = {
             "request_data": request_data or {},
