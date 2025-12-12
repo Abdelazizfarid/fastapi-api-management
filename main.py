@@ -1835,30 +1835,35 @@ import os
 import tempfile
 
 # -----------------------------
-# FIX protobuf conflict
+# FIX protobuf conflict - MUST be done before any google imports
 # -----------------------------
-user_site_packages = os.path.expanduser("~/.local/lib/python3.10/site-packages")
-modules_to_remove = [k for k in list(sys.modules.keys())
-                     if k.startswith('google.protobuf') or k.startswith('google.rpc')]
+# Remove any existing protobuf modules
+modules_to_remove = []
+for k in list(sys.modules.keys()):
+    if k.startswith('google.protobuf') or k.startswith('google.rpc') or k.startswith('google.generativeai'):
+        modules_to_remove.append(k)
 for mod in modules_to_remove:
-    del sys.modules[mod]
+    if mod in sys.modules:
+        del sys.modules[mod]
 
-new_path = []
-dist_packages_paths = []
-for p in sys.path:
-    if '/usr/lib/python3/dist-packages' in p:
-        dist_packages_paths.append(p)
-    else:
-        new_path.append(p)
-
-if user_site_packages in new_path:
-    new_path.remove(user_site_packages)
-new_path.insert(0, user_site_packages)
-new_path.extend(dist_packages_paths)
-sys.path = new_path
+# Reorder sys.path to prioritize user site-packages
+user_site_packages = os.path.expanduser("~/.local/lib/python3.10/site-packages")
+if os.path.exists(user_site_packages):
+    new_path = []
+    dist_packages_paths = []
+    for p in sys.path:
+        if '/usr/lib/python3/dist-packages' in p:
+            dist_packages_paths.append(p)
+        elif p != user_site_packages:
+            new_path.append(p)
+    
+    # Insert user site-packages first, then dist-packages last
+    new_path.insert(0, user_site_packages)
+    new_path.extend(dist_packages_paths)
+    sys.path = new_path
 
 # -----------------------------
-# IMPORT GEMINI SDK
+# IMPORT GEMINI SDK (after protobuf fix)
 # -----------------------------
 import google.generativeai as genai
 
