@@ -638,6 +638,9 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
         # This is critical when code executes in threads and protobuf modules
         # might already be loaded in the main process
         import importlib
+        import gc
+        
+        # More aggressive cleanup - remove ALL google-related modules
         modules_to_remove = []
         for module_name in list(sys.modules.keys()):
             if any(module_name.startswith(prefix) for prefix in [
@@ -645,16 +648,26 @@ def execute_python_code(code: str, request_data: Dict = None, log_id: str = None
                 'google.rpc', 
                 'google.generativeai',
                 'google.api',
-                'google.type'
+                'google.type',
+                'google._upb',
+                'google._message'
             ]):
                 modules_to_remove.append(module_name)
         
-        for mod in modules_to_remove:
+        # Remove modules in reverse order (dependencies first)
+        for mod in sorted(modules_to_remove, reverse=True):
             if mod in sys.modules:
                 try:
+                    # Clear any references
+                    module_obj = sys.modules[mod]
+                    if hasattr(module_obj, '__dict__'):
+                        module_obj.__dict__.clear()
                     del sys.modules[mod]
                 except:
                     pass
+        
+        # Force garbage collection to clean up references
+        gc.collect()
         
         # Invalidate import caches to ensure fresh imports
         try:
@@ -1866,30 +1879,54 @@ import tempfile
 # -----------------------------
 # FIX protobuf conflict - MUST be done before any google imports
 # -----------------------------
-# Remove any existing protobuf modules
-modules_to_remove = []
-for k in list(sys.modules.keys()):
-    if k.startswith('google.protobuf') or k.startswith('google.rpc') or k.startswith('google.generativeai'):
-        modules_to_remove.append(k)
-for mod in modules_to_remove:
-    if mod in sys.modules:
-        del sys.modules[mod]
+import gc
+import importlib
 
-# Reorder sys.path to prioritize user site-packages
-user_site_packages = os.path.expanduser("~/.local/lib/python3.10/site-packages")
-if os.path.exists(user_site_packages):
-    new_path = []
-    dist_packages_paths = []
-    for p in sys.path:
-        if '/usr/lib/python3/dist-packages' in p:
-            dist_packages_paths.append(p)
-        elif p != user_site_packages:
-            new_path.append(p)
-    
-    # Insert user site-packages first, then dist-packages last
-    new_path.insert(0, user_site_packages)
-    new_path.extend(dist_packages_paths)
-    sys.path = new_path
+# More aggressive cleanup - remove ALL google-related modules
+modules_to_remove = []
+for module_name in list(sys.modules.keys()):
+    if any(module_name.startswith(prefix) for prefix in [
+        'google.protobuf',
+        'google.rpc', 
+        'google.generativeai',
+        'google.api',
+        'google.type',
+        'google._upb',
+        'google._message'
+    ]):
+        modules_to_remove.append(module_name)
+
+# Remove modules in reverse order (dependencies first)
+for mod in sorted(modules_to_remove, reverse=True):
+    if mod in sys.modules:
+        try:
+            # Clear any references
+            module_obj = sys.modules[mod]
+            if hasattr(module_obj, '__dict__'):
+                module_obj.__dict__.clear()
+            del sys.modules[mod]
+        except:
+            pass
+
+# Force garbage collection
+gc.collect()
+
+# Reorder sys.path to prioritize venv packages over system packages
+venv_path = None
+for p in sys.path:
+    if 'venv' in p and 'site-packages' in p:
+        venv_path = p
+        break
+
+if venv_path:
+    # Move venv site-packages to front
+    sys.path = [venv_path] + [p for p in sys.path if p != venv_path]
+
+# Remove system dist-packages from path to avoid conflicts
+sys.path = [p for p in sys.path if '/usr/lib/python3/dist-packages' not in p]
+
+# Invalidate import caches
+importlib.invalidate_caches()
 
 # -----------------------------
 # IMPORT GEMINI SDK (after protobuf fix)
