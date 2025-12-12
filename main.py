@@ -1888,8 +1888,20 @@ importlib.invalidate_caches()
 # -----------------------------
 # IMPORT GEMINI SDK (after protobuf fix)
 # -----------------------------
-# Import generativeai - it will handle protobuf imports internally
-# Don't pre-import protobuf as it may cause conflicts
+# Ensure protobuf is imported first to avoid Empty attribute errors
+# Import protobuf explicitly to ensure it's loaded with all attributes
+try:
+    import google.protobuf
+    import google.protobuf.message
+    # Ensure Empty is available
+    if not hasattr(google.protobuf.message, 'Empty'):
+        # Force reload if Empty is missing
+        import importlib
+        importlib.reload(google.protobuf.message)
+except Exception as e:
+    print(f"DEBUG: Protobuf import check: {e}")
+
+# Now import generativeai
 import google.generativeai as genai
 
 # -----------------------------
