@@ -113,12 +113,12 @@ app = FastAPI(title="API Management System")
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# PostgreSQL Database Configuration
+# PostgreSQL Database Configuration (Hub Production - Huawei Cloud)
 DB_CONFIG = {
-    'dbname': 'api_management',
-    'user': 'api_user',
-    'password': 'api_password_123',
-    'host': 'localhost',
+    'dbname': 'beyond',
+    'user': 'odoo',
+    'password': 'PBLBOIq9HR0YVslM',
+    'host': '71cacc31a9d042789ce3bd6f445d6635in03.internal.af-north-1.postgresql.rds.myhuaweicloud.com',
     'port': '5432'
 }
 
