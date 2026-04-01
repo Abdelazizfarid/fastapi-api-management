@@ -113,13 +113,14 @@ app = FastAPI(title="API Management System")
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# PostgreSQL Database Configuration (Hub Production - Huawei Cloud)
+# PostgreSQL Database Configuration (Hub Production via SSH Tunnel)
+# Tunnel: localhost:5433 -> Hub -> Huawei Cloud Internal DB
 DB_CONFIG = {
     'dbname': 'beyond',
     'user': 'odoo',
     'password': 'PBLBOIq9HR0YVslM',
-    'host': '71cacc31a9d042789ce3bd6f445d6635in03.internal.af-north-1.postgresql.rds.myhuaweicloud.com',
-    'port': '5432'
+    'host': 'localhost',
+    'port': '5433'
 }
 
 # Connection pool for PostgreSQL
